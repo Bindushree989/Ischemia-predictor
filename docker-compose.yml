@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:15
+    environment: {POSTGRES_USER: ischemia, POSTGRES_PASSWORD: change-me, POSTGRES_DB: ischemia}
+  ml:
+    build: .
+    command: gunicorn -b 0.0.0.0:5001 services.model_service:app
+    environment: {MODEL_TYPE: ML}
+    volumes: ["./models:/app/models:ro"]
+  dl:
+    build: .
+    command: gunicorn -b 0.0.0.0:5001 services.model_service:app
+    environment: {MODEL_TYPE: DL}
+    volumes: ["./models:/app/models:ro"]
+  qml:
+    build: .
+    command: gunicorn -b 0.0.0.0:5001 services.model_service:app
+    environment: {MODEL_TYPE: QML}
+    volumes: ["./models:/app/models:ro"]
+  web:
+    build: .
+    ports: ["5000:5000"]          # only the web server is exposed (SEC-08)
+    environment:
+      DATABASE_URL: postgresql://ischemia:change-me@db/ischemia
+      ML_URL: http://ml:5001
+      DL_URL: http://dl:5001
+      QML_URL: http://qml:5001
+      SECRET_KEY: change-this-to-a-long-random-string-123456
+      DATA_KEY: "0000000000000000000000000000000000000000000000000000000000000000"  # replace: 64 hex chars
+    volumes: ["./models:/app/models"]
+    depends_on: [db, ml, dl, qml]

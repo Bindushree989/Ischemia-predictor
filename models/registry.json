@@ -1,0 +1,41 @@
+[
+  {
+    "type": "ML",
+    "version": "ml-1.0",
+    "file": "ml-1.0.joblib",
+    "sha256": "99bebcb6c42066a5c68bb18f5d964a6e7c1d6fe8b341e9812d3d696b81e0393a",
+    "pipeline_version": "pipeline-1.0",
+    "status": "validated",
+    "is_active": true,
+    "metrics": {
+      "accuracy": 0.9022,
+      "recall": 0.9314
+    }
+  },
+  {
+    "type": "DL",
+    "version": "dl-1.0",
+    "file": "dl-1.0.joblib",
+    "sha256": "411124066d1cf60f588bbced489442f627eaeb62da863bcc33df87aa76cc790f",
+    "pipeline_version": "pipeline-1.0",
+    "status": "validated",
+    "is_active": true,
+    "metrics": {
+      "accuracy": 0.8696,
+      "recall": 0.9118
+    }
+  },
+  {
+    "type": "QML",
+    "version": "qml-1.0",
+    "file": "qml-1.0.joblib",
+    "sha256": "7fb275c646f9c47c2b8d2b1664d0e49717a618cdb700b9bb502478d02fabd613",
+    "pipeline_version": "pipeline-1.0",
+    "status": "unvalidated",
+    "is_active": false,
+    "metrics": {
+      "accuracy": 0.75,
+      "recall": 0.7059
+    }
+  }
+]

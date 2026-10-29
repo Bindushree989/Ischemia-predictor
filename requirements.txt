@@ -1,0 +1,15 @@
+numpy
+pandas
+scipy
+scikit-learn
+joblib
+flask
+flask-sqlalchemy
+bcrypt
+PyJWT
+requests
+cryptography
+pennylane
+pytest
+gunicorn
+psycopg2-binary

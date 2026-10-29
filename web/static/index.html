@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ischemia Predictor</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1d2433;--mut:#667085;--acc:#0f766e;--bad:#b42318;--line:#d9dee7}
+@media(prefers-color-scheme:dark){:root{--bg:#10151f;--card:#18202e;--ink:#e8ecf3;--mut:#9aa6bb;--acc:#2dd4bf;--bad:#f97066;--line:#2c3649}}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif}
+main{max-width:860px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:12px 0}
+nav button,button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;margin:2px}
+button.sec{background:transparent;color:var(--ink);border:1px solid var(--line)}
+label{display:block;font-size:14px;color:var(--mut)} input,select{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);box-sizing:border-box}
+input.bad,select.bad{border-color:var(--bad);outline:1px solid var(--bad)} .err{color:var(--bad);font-size:13px;min-height:18px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.hide{display:none} table{width:100%;border-collapse:collapse} td,th{padding:6px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}
+.big{font-size:28px;font-weight:700}.disc{color:var(--mut);font-size:13px;margin-top:10px}
+</style></head><body><main>
+<h1>Ischemia Predictor</h1>
+<nav id="nav" class="hide"><button data-p="predict">Predict</button><button data-p="history">History</button>
+<button data-p="admin" id="adminTab">Admin</button><button class="sec" id="logout">Log out</button></nav>
+
+<section id="login" class="card"><h2>Log in</h2>
+<label>Username<input id="u" autocomplete="username"></label>
+<label>Password<input id="pw" type="password" autocomplete="current-password"></label>
+<div class="err" id="loginErr"></div><button id="loginBtn">Log in</button></section>
+
+<section id="predict" class="card hide"><h2>Patient data</h2>
+<div class="grid" id="fields"></div>
+<label>Model<select id="model"><option>ML</option><option>DL</option><option>QML</option></select></label>
+<div class="err" id="predErr"></div>
+<button id="go">Predict</button><button class="sec" id="clear">Clear</button>
+<div id="result" class="hide card"><div class="big" id="rLabel"></div><div id="rProb"></div><div id="rRisk"></div>
+<h3>Top features</h3><ul id="rFeat"></ul><div class="disc" id="rDisc"></div></div></section>
+
+<section id="history" class="card hide"><h2>My predictions</h2><table><thead><tr><th>Time</th><th>Result</th><th>Prob.</th><th>Risk</th><th>Model</th></tr></thead><tbody id="hBody"></tbody></table>
+<button class="sec" id="prev">Prev</button><button class="sec" id="next">Next</button></section>
+
+<section id="admin" class="card hide"><h2>Administration</h2>
+<h3>Create user</h3><div class="grid"><input id="nu" placeholder="username"><input id="np" type="password" placeholder="password"><select id="nr"><option>Clinician</option><option>Administrator</option><option>ML Engineer</option></select></div>
+<button id="mkUser">Create</button><div class="err" id="adErr"></div>
+<h3>Models</h3><table><tbody id="mBody"></tbody></table><h3>Audit log</h3><table><tbody id="lBody"></tbody></table></section>
+</main>
+<script>
+// number field: [label, unit, min, max]   dropdown field: [label, [[text,value],...]]
+const F={age:["Age","years",1,120],
+sex:["Sex",[["Female",0],["Male",1]]],
+chest_pain_type:["Chest pain type",[["Typical angina",0],["Atypical angina",1],["Non-anginal pain",2],["Asymptomatic",3]]],
+resting_bp:["Resting blood pressure","mm Hg",50,250],
+cholesterol:["Serum cholesterol","mg/dl",50,700],
+fasting_bs:["Fasting blood sugar > 120 mg/dl",[["No",0],["Yes",1]]],
+resting_ecg:["Resting ECG",[["Normal",0],["ST-T wave abnormality",1],["Left ventricular hypertrophy",2]]],
+max_hr:["Maximum heart rate achieved","bpm",40,250],
+exercise_angina:["Exercise-induced angina",[["No",0],["Yes",1]]],
+oldpeak:["ST depression (Oldpeak)","mm",-3,7],
+st_slope:["ST slope",[["Upsloping",0],["Flat",1],["Downsloping",2]]]};
+let token=null,role=null,page=1,idle=null;const $=i=>document.getElementById(i);
+const show=id=>{["login","predict","history","admin"].forEach(s=>$(s).classList.toggle("hide",s!==id))};
+for(const[k,v]of Object.entries(F)){const d=document.createElement("div");const l=document.createElement("label");const dd=Array.isArray(v[1]);
+l.textContent=dd?v[0]:`${v[0]} (${v[1]}, ${v[2]} to ${v[3]})`;let i;
+if(dd){i=document.createElement("select");const o=document.createElement("option");o.value="";o.textContent="Select...";i.appendChild(o);v[1].forEach(([t,val])=>{const op=document.createElement("option");op.value=val;op.textContent=t;i.appendChild(op)})}
+else{i=document.createElement("input");i.type="number";i.step="any"}
+i.id="f_"+k;const e=document.createElement("div");e.className="err";e.id="e_"+k;l.appendChild(i);d.append(l,e);$("fields").appendChild(d)}
+async function api(method,path,body){const r=await fetch("/api/v1"+path,{method,headers:{"Content-Type":"application/json",...(token?{Authorization:"Bearer "+token}:{})},body:body?JSON.stringify(body):undefined});
+const t=r.headers.get("X-Token");if(t){token=t;clearTimeout(idle);idle=setTimeout(out,15*60*1000)}
+if(r.status===401&&token){out();} let j=null;try{j=await r.json()}catch(e){} return{ok:r.ok,status:r.status,j}}
+function out(){token=null;role=null;$("nav").classList.add("hide");show("login")}
+$("logout").onclick=async()=>{await api("POST","/auth/logout");out()};
+$("loginBtn").onclick=async()=>{const r=await api("POST","/auth/login",{username:$("u").value,password:$("pw").value});
+if(!r.ok){$("loginErr").textContent=r.j.message;return}token=r.j.token;role=r.j.role;$("pw").value="";$("nav").classList.remove("hide");
+$("adminTab").classList.toggle("hide",role!=="Administrator");show(role==="Administrator"?"history":"predict")};
+document.querySelectorAll("nav [data-p]").forEach(b=>b.onclick=()=>{show(b.dataset.p);if(b.dataset.p==="history")loadHist();if(b.dataset.p==="admin")loadAdmin()});
+function clearAll(){Object.keys(F).forEach(k=>{$("f_"+k).value="";$("f_"+k).classList.remove("bad");$("e_"+k).textContent=""});$("result").classList.add("hide");$("predErr").textContent=""}
+$("clear").onclick=clearAll;
+$("go").onclick=async()=>{const body={model:$("model").value};Object.keys(F).forEach(k=>{const v=$("f_"+k).value;body[k]=v===""?null:Number(v);$("f_"+k).classList.remove("bad");$("e_"+k).textContent=""});$("predErr").textContent="";
+const r=await api("POST","/predictions",body);
+if(r.status===400&&r.j.fields){for(const[k,m]of Object.entries(r.j.fields)){$("f_"+k).classList.add("bad");$("e_"+k).textContent=m}return}
+if(!r.ok){$("predErr").textContent=r.j.message;return}
+const p=r.j;$("rLabel").textContent=p.label;$("rProb").textContent="Probability: "+p.probability.toFixed(1)+"%";$("rRisk").textContent="Risk: "+p.risk+" · model "+p.model_version;
+$("rFeat").replaceChildren(...p.top_features.map(f=>{const li=document.createElement("li");li.textContent=f.name+" — "+f.direction+" risk";return li}));$("rDisc").textContent=p.disclaimer;$("result").classList.remove("hide")};
+async function loadHist(){const r=await api("GET","/predictions?page="+page);if(!r.ok)return;$("hBody").replaceChildren(...r.j.items.map(p=>{const tr=document.createElement("tr");[new Date(p.created_at+"Z").toLocaleString(),p.label,p.probability.toFixed(1)+"%",p.risk,p.model_version].forEach(t=>{const td=document.createElement("td");td.textContent=t;tr.appendChild(td)});return tr}))}
+$("prev").onclick=()=>{if(page>1){page--;loadHist()}};$("next").onclick=()=>{page++;loadHist()};
+function row(vals,btn){const tr=document.createElement("tr");vals.forEach(t=>{const td=document.createElement("td");td.textContent=t;tr.appendChild(td)});if(btn){const td=document.createElement("td");td.appendChild(btn);tr.appendChild(td)}return tr}
+async function loadAdmin(){let r=await api("GET","/models");if(r.ok)$("mBody").replaceChildren(...r.j.map(m=>{const b=document.createElement("button");b.textContent=m.is_active?"Active":"Activate";b.disabled=m.is_active;b.onclick=async()=>{const x=await api("PUT","/models/"+m.id+"/activate");if(!x.ok)$("adErr").textContent=x.j.message;loadAdmin()};return row([m.type,m.version,m.status],b)}));
+r=await api("GET","/admin/audit-logs");if(r.ok)$("lBody").replaceChildren(...r.j.map(l=>row([l.timestamp,l.user_id,l.action,l.ip])))}
+$("mkUser").onclick=async()=>{const r=await api("POST","/admin/users",{username:$("nu").value,password:$("np").value,role:$("nr").value});$("adErr").textContent=r.ok?"User created.":r.j.message;loadAdmin()};
+</script></body></html>
