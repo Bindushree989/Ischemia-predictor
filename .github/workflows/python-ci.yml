@@ -1,0 +1,46 @@
+name: Python CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pylint flake8 bandit
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Lint with flake8
+        run: |
+          # Fail on syntax errors / undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Style warnings (non-blocking)
+          flake8 . --count --exit-zero --max-line-length=100 --statistics
+
+      - name: Lint with pylint
+        run: pylint $(git ls-files '*.py') --fail-under=8.0
+
+      - name: Security scan with bandit
+        run: bandit -r . -x ./tests,./venv -ll
+
+      - name: Run unit tests (unittest)
+        run: python -m unittest discover -s tests -v
