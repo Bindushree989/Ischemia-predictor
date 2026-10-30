@@ -16,7 +16,7 @@ input.bad,select.bad{border-color:var(--bad);outline:1px solid var(--bad)} .err{
 .big{font-size:28px;font-weight:700}.disc{color:var(--mut);font-size:13px;margin-top:10px}
 </style></head><body><main>
 <h1>Ischemia Predictor</h1>
-<nav id="nav" class="hide"><button data-p="predict">Predict</button><button data-p="history">History</button>
+<nav id="nav" class="hide"><button data-p="predict" id="predictTab">Predict</button><button data-p="history" id="historyTab">History</button>
 <button data-p="admin" id="adminTab">Admin</button><button class="sec" id="logout">Log out</button></nav>
 
 <section id="login" class="card"><h2>Log in</h2>
@@ -67,6 +67,7 @@ function out(){token=null;role=null;$("nav").classList.add("hide");show("login")
 $("logout").onclick=async()=>{await api("POST","/auth/logout");out()};
 $("loginBtn").onclick=async()=>{const r=await api("POST","/auth/login",{username:$("u").value,password:$("pw").value});
 if(!r.ok){$("loginErr").textContent=r.j.message;return}token=r.j.token;role=r.j.role;$("pw").value="";$("nav").classList.remove("hide");
+$("predictTab").classList.toggle("hide",role==="Administrator");$("historyTab").classList.toggle("hide",role==="ML Engineer");
 $("adminTab").classList.toggle("hide",role!=="Administrator");show(role==="Administrator"?"history":"predict")};
 document.querySelectorAll("nav [data-p]").forEach(b=>b.onclick=()=>{show(b.dataset.p);if(b.dataset.p==="history")loadHist();if(b.dataset.p==="admin")loadAdmin()});
 function clearAll(){Object.keys(F).forEach(k=>{$("f_"+k).value="";$("f_"+k).classList.remove("bad");$("e_"+k).textContent=""});$("result").classList.add("hide");$("predErr").textContent=""}
