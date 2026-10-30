@@ -1,86 +1,691 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Ischemia Predictor</title>
-<style>
-:root{--bg:#f6f7f9;--card:#fff;--ink:#1d2433;--mut:#667085;--acc:#0f766e;--bad:#b42318;--line:#d9dee7}
-@media(prefers-color-scheme:dark){:root{--bg:#10151f;--card:#18202e;--ink:#e8ecf3;--mut:#9aa6bb;--acc:#2dd4bf;--bad:#f97066;--line:#2c3649}}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif}
-main{max-width:860px;margin:0 auto;padding:16px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:12px 0}
-nav button,button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;margin:2px}
-button.sec{background:transparent;color:var(--ink);border:1px solid var(--line)}
-label{display:block;font-size:14px;color:var(--mut)} input,select{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);box-sizing:border-box}
-input.bad,select.bad{border-color:var(--bad);outline:1px solid var(--bad)} .err{color:var(--bad);font-size:13px;min-height:18px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
-.hide{display:none} table{width:100%;border-collapse:collapse} td,th{padding:6px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}
-.big{font-size:28px;font-weight:700}.disc{color:var(--mut);font-size:13px;margin-top:10px}
-</style></head><body><main>
-<h1>Ischemia Predictor</h1>
-<nav id="nav" class="hide"><button data-p="predict">Predict</button><button data-p="history">History</button>
-<button data-p="admin" id="adminTab">Admin</button><button class="sec" id="logout">Log out</button></nav>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101827">
+  <title>Ischemia Predictor | Clinical Workspace</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3f6fa;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --ink: #172338;
+      --muted: #68778d;
+      --line: #e2e8f0;
+      --primary: #176b67;
+      --primary-dark: #10534f;
+      --primary-soft: #e5f4f1;
+      --danger: #b42318;
+      --danger-soft: #fff0ee;
+      --warning: #946200;
+      --warning-soft: #fff6df;
+      --success: #16734a;
+      --success-soft: #e9f7ef;
+      --shadow: 0 12px 32px rgba(25, 43, 67, .06);
+      --radius: 16px;
+    }
+    [data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #0d1420;
+      --surface: #151f2e;
+      --surface-soft: #1b293a;
+      --ink: #e8eef7;
+      --muted: #a0aec0;
+      --line: #2b3a4d;
+      --primary: #55c4b5;
+      --primary-dark: #80d7ca;
+      --primary-soft: #173b3a;
+      --danger: #ff8a80;
+      --danger-soft: #3b2226;
+      --warning: #f3c969;
+      --warning-soft: #3a321f;
+      --success: #72d6a1;
+      --success-soft: #19372b;
+      --shadow: 0 12px 32px rgba(0, 0, 0, .18);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font: 15px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .55; }
+    .hidden { display: none !important; }
+    .app-shell { min-height: 100vh; }
+    .topbar {
+      height: 72px; display: flex; align-items: center; justify-content: space-between;
+      gap: 18px; padding: 0 34px; background: var(--surface);
+      border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand-mark {
+      width: 38px; height: 38px; display: grid; place-items: center; border-radius: 12px;
+      background: var(--primary-soft); color: var(--primary); font-size: 20px; font-weight: 800;
+    }
+    .brand-title { font-weight: 750; letter-spacing: -.03em; }
+    .brand-subtitle { color: var(--muted); font-size: 12px; margin-top: -3px; }
+    .top-actions { display: flex; align-items: center; gap: 10px; }
+    .role-chip, .status-chip {
+      display: inline-flex; align-items: center; border-radius: 999px; padding: 5px 10px;
+      background: var(--surface-soft); border: 1px solid var(--line); color: var(--muted);
+      font-size: 12px; font-weight: 650;
+    }
+    .layout { display: grid; grid-template-columns: 238px minmax(0, 1fr); min-height: calc(100vh - 72px); }
+    .sidebar {
+      padding: 26px 16px; background: var(--surface); border-right: 1px solid var(--line);
+    }
+    .nav-label { padding: 0 12px; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; margin: 8px 0 12px; }
+    .nav-list { display: grid; gap: 6px; }
+    .nav-btn {
+      width: 100%; border: 0; border-radius: 10px; background: transparent; color: var(--muted);
+      text-align: left; padding: 11px 12px; font-weight: 650; display: flex; gap: 11px; align-items: center;
+    }
+    .nav-btn:hover, .nav-btn.active { color: var(--primary); background: var(--primary-soft); }
+    .nav-icon { width: 20px; text-align: center; font-size: 16px; }
+    .sidebar-note { margin: 30px 8px 0; padding: 13px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); font-size: 12px; }
+    main { min-width: 0; padding: 34px clamp(18px, 4vw, 54px) 60px; max-width: 1500px; width: 100%; margin: 0 auto; }
+    .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 26px; }
+    h1 { font-size: clamp(24px, 3vw, 32px); line-height: 1.15; letter-spacing: -.04em; margin: 0 0 7px; }
+    h2 { font-size: 19px; letter-spacing: -.02em; margin: 0 0 5px; }
+    h3 { font-size: 14px; margin: 0 0 12px; }
+    p { margin: 0; }
+    .muted { color: var(--muted); }
+    .eyebrow { color: var(--primary); text-transform: uppercase; letter-spacing: .12em; font-size: 10px; font-weight: 800; margin-bottom: 8px; }
+    .card {
+      background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+      box-shadow: var(--shadow); padding: 22px; min-width: 0;
+    }
+    .card + .card { margin-top: 18px; }
+    .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+    .btn {
+      border: 1px solid transparent; border-radius: 10px; padding: 10px 15px;
+      font-weight: 700; transition: .15s ease; display: inline-flex; justify-content: center; align-items: center; gap: 8px;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-secondary { background: var(--surface); border-color: var(--line); color: var(--ink); }
+    .btn-secondary:hover { background: var(--surface-soft); }
+    .btn-small { padding: 7px 10px; font-size: 12px; }
+    .icon-btn { width: 38px; height: 38px; padding: 0; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+    .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 15% 10%, var(--primary-soft), transparent 35%), var(--bg); }
+    .login-card { width: min(100%, 430px); padding: 34px; }
+    .login-card .brand { margin-bottom: 30px; }
+    .field-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .field { min-width: 0; }
+    label { display: block; color: var(--muted); font-size: 12px; font-weight: 700; margin-bottom: 7px; }
+    input, select {
+      width: 100%; min-height: 43px; padding: 10px 12px; border: 1px solid var(--line);
+      border-radius: 10px; background: var(--surface-soft); color: var(--ink); outline: none;
+    }
+    input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 15%, transparent); }
+    input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--danger); }
+    .field-error, .message { color: var(--danger); font-size: 12px; min-height: 17px; margin-top: 5px; }
+    .form-section { padding: 18px 0; border-top: 1px solid var(--line); }
+    .form-section:first-of-type { border-top: 0; padding-top: 0; }
+    .form-section-title { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+    .form-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 18px; }
+    .result-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(250px, .85fr); gap: 16px; }
+    .result-primary { background: var(--surface-soft); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+    .result-label { font-size: 23px; font-weight: 800; letter-spacing: -.03em; }
+    .probability { font-size: 42px; line-height: 1.1; font-weight: 800; letter-spacing: -.05em; margin: 14px 0 6px; }
+    .progress { height: 9px; border-radius: 99px; background: var(--line); overflow: hidden; margin: 13px 0; }
+    .progress > span { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--primary); transition: width .3s ease; }
+    .risk-low { color: var(--success); background: var(--success-soft); }
+    .risk-moderate { color: var(--warning); background: var(--warning-soft); }
+    .risk-high { color: var(--danger); background: var(--danger-soft); }
+    .risk-pill { display: inline-flex; border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 800; }
+    .feature-list { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0; }
+    .feature-list li { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); padding-bottom: 9px; font-size: 13px; }
+    .disclaimer { color: var(--muted); font-size: 12px; margin-top: 16px; padding: 12px; border-left: 3px solid var(--warning); background: var(--warning-soft); border-radius: 0 8px 8px 0; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 620px; }
+    th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--line); font-size: 13px; white-space: nowrap; }
+    th { color: var(--muted); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+    tbody tr:hover { background: var(--surface-soft); }
+    .table-empty { text-align: center; color: var(--muted); padding: 30px; }
+    .pagination { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+    .stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+    .stat-value { font-size: 25px; font-weight: 800; letter-spacing: -.04em; margin-top: 8px; }
+    .stat-label { color: var(--muted); font-size: 12px; font-weight: 650; }
+    .stack { display: grid; gap: 18px; }
+    .inline-fields { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; align-items: end; }
+    .alert { border-radius: 10px; padding: 11px 13px; font-size: 13px; margin: 12px 0; }
+    .alert-error { color: var(--danger); background: var(--danger-soft); }
+    .alert-success { color: var(--success); background: var(--success-soft); }
+    .loading { opacity: .65; pointer-events: none; }
+    .mobile-menu { display: none; }
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 190px minmax(0, 1fr); }
+      .field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .result-grid { grid-template-columns: 1fr; }
+      .topbar { padding: 0 20px; }
+    }
+    @media (max-width: 700px) {
+      .topbar { height: 62px; padding: 0 14px; }
+      .layout { display: block; min-height: calc(100vh - 62px); }
+      .sidebar { display: none; position: fixed; z-index: 8; top: 62px; left: 0; right: 0; border-right: 0; border-bottom: 1px solid var(--line); padding: 12px; }
+      .sidebar.open { display: block; }
+      .nav-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .sidebar-note { display: none; }
+      main { padding: 24px 14px 40px; }
+      .mobile-menu { display: inline-grid; place-items: center; }
+      .role-chip { display: none; }
+      .field-grid, .stat-grid { grid-template-columns: 1fr 1fr; }
+      .inline-fields { grid-template-columns: 1fr; }
+      .page-heading { align-items: center; }
+      .card { padding: 17px; }
+    }
+    @media (max-width: 420px) {
+      .field-grid, .stat-grid { grid-template-columns: 1fr; }
+      .brand-subtitle { display: none; }
+      .login-card { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <section id="loginView" class="login-wrap">
+    <div class="card login-card">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">+</div>
+        <div><div class="brand-title">Ischemia Predictor</div><div class="brand-subtitle">Clinical decision-support workspace</div></div>
+      </div>
+      <div class="eyebrow">Secure access</div>
+      <h1 style="font-size:27px">Sign in to your workspace</h1>
+      <p class="muted" style="margin:8px 0 22px">Use the account credentials provided by your administrator.</p>
+      <form id="loginForm">
+        <div class="field"><label for="username">Username</label><input id="username" name="username" autocomplete="username" required></div>
+        <div class="field" style="margin-top:14px"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
+        <div id="loginMessage" class="message" role="alert" aria-live="polite"></div>
+        <button id="loginButton" class="btn btn-primary" type="submit" style="width:100%;margin-top:10px">Sign in</button>
+      </form>
+      <p class="muted" style="font-size:11px;margin-top:22px">Authorized users only. Sessions expire after inactivity.</p>
+    </div>
+  </section>
 
-<section id="login" class="card"><h2>Log in</h2>
-<label>Username<input id="u" autocomplete="username"></label>
-<label>Password<input id="pw" type="password" autocomplete="current-password"></label>
-<div class="err" id="loginErr"></div><button id="loginBtn">Log in</button></section>
+  <div id="appView" class="app-shell hidden">
+    <header class="topbar">
+      <div class="brand">
+        <button id="mobileMenu" class="icon-btn mobile-menu" aria-label="Toggle navigation">☰</button>
+        <div class="brand-mark" aria-hidden="true">+</div>
+        <div><div class="brand-title">Ischemia Predictor</div><div class="brand-subtitle">Clinical decision-support workspace</div></div>
+      </div>
+      <div class="top-actions">
+        <span id="roleChip" class="role-chip"></span>
+        <button id="themeToggle" class="icon-btn" type="button" aria-label="Toggle color theme">◐</button>
+        <button id="logoutButton" class="btn btn-secondary btn-small" type="button">Sign out</button>
+      </div>
+    </header>
+    <div class="layout">
+      <aside id="sidebar" class="sidebar">
+        <div class="nav-label">Workspace</div>
+        <nav id="navigation" class="nav-list" aria-label="Main navigation">
+          <button class="nav-btn active" data-page="predictPage"><span class="nav-icon">⌕</span>New prediction</button>
+          <button class="nav-btn" data-page="historyPage" id="historyNav"><span class="nav-icon">▤</span>Prediction history</button>
+          <button class="nav-btn hidden" data-page="adminPage" id="adminNav"><span class="nav-icon">⚙</span>Administration</button>
+          <button class="nav-btn hidden" data-page="modelsPage" id="modelsNav"><span class="nav-icon">▦</span>Model registry</button>
+        </nav>
+        <div class="sidebar-note"><strong>Privacy reminder</strong><br>Enter only the patient information required for the assessment. Do not include direct identifiers in free-text fields.</div>
+      </aside>
 
-<section id="predict" class="card hide"><h2>Patient data</h2>
-<div class="grid" id="fields"></div>
-<label>Model<select id="model"><option>ML</option><option>DL</option><option>QML</option></select></label>
-<div class="err" id="predErr"></div>
-<button id="go">Predict</button><button class="sec" id="clear">Clear</button>
-<div id="result" class="hide card"><div class="big" id="rLabel"></div><div id="rProb"></div><div id="rRisk"></div>
-<h3>Top features</h3><ul id="rFeat"></ul><div class="disc" id="rDisc"></div></div></section>
+      <main>
+        <section id="predictPage" class="page">
+          <div class="page-heading"><div><div class="eyebrow">Assessment</div><h1>New prediction</h1><p class="muted">Enter the clinical measurements to request a model prediction.</p></div></div>
+          <div class="card">
+            <div class="card-head"><div><h2>Patient measurements</h2><p class="muted">All 11 model inputs are required.</p></div><span class="status-chip">11 inputs</span></div>
+            <form id="predictionForm">
+              <div class="form-section">
+                <div class="form-section-title"><h3>Patient profile</h3><span class="muted" style="font-size:11px">01 / 03</span></div>
+                <div class="field-grid">
+                  <div class="field"><label for="f_age">Age (years)</label><input id="f_age" type="number" min="1" max="120" step="1" required></div>
+                  <div class="field"><label for="f_sex">Sex</label><select id="f_sex" required><option value="">Select sex</option><option value="0">Female</option><option value="1">Male</option></select></div>
+                  <div class="field"><label for="f_chest_pain_type">Chest pain type</label><select id="f_chest_pain_type" required><option value="">Select type</option><option value="0">Typical angina</option><option value="1">Atypical angina</option><option value="2">Non-anginal pain</option><option value="3">Asymptomatic</option></select></div>
+                </div>
+              </div>
+              <div class="form-section">
+                <div class="form-section-title"><h3>Clinical measurements</h3><span class="muted" style="font-size:11px">02 / 03</span></div>
+                <div class="field-grid">
+                  <div class="field"><label for="f_resting_bp">Resting blood pressure (mm Hg)</label><input id="f_resting_bp" type="number" min="50" max="250" step="any" required></div>
+                  <div class="field"><label for="f_cholesterol">Serum cholesterol (mg/dl)</label><input id="f_cholesterol" type="number" min="50" max="700" step="any" required></div>
+                  <div class="field"><label for="f_fasting_bs">Fasting blood sugar &gt; 120 mg/dl</label><select id="f_fasting_bs" required><option value="">Select</option><option value="0">No</option><option value="1">Yes</option></select></div>
+                  <div class="field"><label for="f_resting_ecg">Resting ECG</label><select id="f_resting_ecg" required><option value="">Select result</option><option value="0">Normal</option><option value="1">ST-T wave abnormality</option><option value="2">Left ventricular hypertrophy</option></select></div>
+                  <div class="field"><label for="f_max_hr">Maximum heart rate (bpm)</label><input id="f_max_hr" type="number" min="40" max="250" step="any" required></div>
+                  <div class="field"><label for="f_exercise_angina">Exercise-induced angina</label><select id="f_exercise_angina" required><option value="">Select</option><option value="0">No</option><option value="1">Yes</option></select></div>
+                </div>
+              </div>
+              <div class="form-section">
+                <div class="form-section-title"><h3>Exercise and ECG indicators</h3><span class="muted" style="font-size:11px">03 / 03</span></div>
+                <div class="field-grid">
+                  <div class="field"><label for="f_oldpeak">ST depression / Oldpeak (mm)</label><input id="f_oldpeak" type="number" min="-3" max="7" step="any" required></div>
+                  <div class="field"><label for="f_st_slope">ST slope</label><select id="f_st_slope" required><option value="">Select slope</option><option value="0">Upsloping</option><option value="1">Flat</option><option value="2">Downsloping</option></select></div>
+                  <div class="field"><label for="model">Prediction model</label><select id="model"><option value="ML">Machine Learning (ML)</option><option value="DL">Deep Learning (DL)</option><option value="QML">Quantum ML (QML)</option></select></div>
+                </div>
+              </div>
+              <div id="predictionMessage" class="message" role="alert" aria-live="polite"></div>
+              <div class="form-actions">
+                <button id="predictButton" class="btn btn-primary" type="submit">Run prediction</button>
+                <button id="clearButton" class="btn btn-secondary" type="reset">Clear form</button>
+              </div>
+            </form>
+          </div>
 
-<section id="history" class="card hide"><h2>My predictions</h2><table><thead><tr><th>Time</th><th>Result</th><th>Prob.</th><th>Risk</th><th>Model</th></tr></thead><tbody id="hBody"></tbody></table>
-<button class="sec" id="prev">Prev</button><button class="sec" id="next">Next</button></section>
+          <section id="resultCard" class="card hidden" aria-live="polite" style="margin-top:18px">
+            <div class="card-head"><div><div class="eyebrow">Model output</div><h2>Prediction result</h2><p id="resultId" class="muted" style="font-size:12px"></p></div><span id="riskBadge" class="risk-pill"></span></div>
+            <div class="result-grid">
+              <div class="result-primary">
+                <div id="resultLabel" class="result-label"></div>
+                <div id="resultProbability" class="probability">—</div>
+                <div class="muted" style="font-size:12px">Model probability</div>
+                <div class="progress"><span id="probabilityBar"></span></div>
+                <p id="resultModel" class="muted" style="font-size:12px"></p>
+              </div>
+              <div><h3>Top contributing features</h3><ul id="featureList" class="feature-list"></ul></div>
+            </div>
+            <div id="resultDisclaimer" class="disclaimer"></div>
+          </section>
+        </section>
 
-<section id="admin" class="card hide"><h2>Administration</h2>
-<h3>Create user</h3><div class="grid"><input id="nu" placeholder="username"><input id="np" type="password" placeholder="password"><select id="nr"><option>Clinician</option><option>Administrator</option><option>ML Engineer</option></select></div>
-<button id="mkUser">Create</button><div class="err" id="adErr"></div>
-<h3>Models</h3><table><tbody id="mBody"></tbody></table><h3>Audit log</h3><table><tbody id="lBody"></tbody></table></section>
-</main>
-<script>
-// number field: [label, unit, min, max]   dropdown field: [label, [[text,value],...]]
-const F={age:["Age","years",1,120],
-sex:["Sex",[["Female",0],["Male",1]]],
-chest_pain_type:["Chest pain type",[["Typical angina",0],["Atypical angina",1],["Non-anginal pain",2],["Asymptomatic",3]]],
-resting_bp:["Resting blood pressure","mm Hg",50,250],
-cholesterol:["Serum cholesterol","mg/dl",50,700],
-fasting_bs:["Fasting blood sugar > 120 mg/dl",[["No",0],["Yes",1]]],
-resting_ecg:["Resting ECG",[["Normal",0],["ST-T wave abnormality",1],["Left ventricular hypertrophy",2]]],
-max_hr:["Maximum heart rate achieved","bpm",40,250],
-exercise_angina:["Exercise-induced angina",[["No",0],["Yes",1]]],
-oldpeak:["ST depression (Oldpeak)","mm",-3,7],
-st_slope:["ST slope",[["Upsloping",0],["Flat",1],["Downsloping",2]]]};
-let token=null,role=null,page=1,idle=null;const $=i=>document.getElementById(i);
-const show=id=>{["login","predict","history","admin"].forEach(s=>$(s).classList.toggle("hide",s!==id))};
-for(const[k,v]of Object.entries(F)){const d=document.createElement("div");const l=document.createElement("label");const dd=Array.isArray(v[1]);
-l.textContent=dd?v[0]:`${v[0]} (${v[1]}, ${v[2]} to ${v[3]})`;let i;
-if(dd){i=document.createElement("select");const o=document.createElement("option");o.value="";o.textContent="Select...";i.appendChild(o);v[1].forEach(([t,val])=>{const op=document.createElement("option");op.value=val;op.textContent=t;i.appendChild(op)})}
-else{i=document.createElement("input");i.type="number";i.step="any"}
-i.id="f_"+k;const e=document.createElement("div");e.className="err";e.id="e_"+k;l.appendChild(i);d.append(l,e);$("fields").appendChild(d)}
-async function api(method,path,body){const r=await fetch("/api/v1"+path,{method,headers:{"Content-Type":"application/json",...(token?{Authorization:"Bearer "+token}:{})},body:body?JSON.stringify(body):undefined});
-const t=r.headers.get("X-Token");if(t){token=t;clearTimeout(idle);idle=setTimeout(out,15*60*1000)}
-if(r.status===401&&token){out();} let j=null;try{j=await r.json()}catch(e){} return{ok:r.ok,status:r.status,j}}
-function out(){token=null;role=null;$("nav").classList.add("hide");show("login")}
-$("logout").onclick=async()=>{await api("POST","/auth/logout");out()};
-$("loginBtn").onclick=async()=>{const r=await api("POST","/auth/login",{username:$("u").value,password:$("pw").value});
-if(!r.ok){$("loginErr").textContent=r.j.message;return}token=r.j.token;role=r.j.role;$("pw").value="";$("nav").classList.remove("hide");
-$("adminTab").classList.toggle("hide",role!=="Administrator");show(role==="Administrator"?"history":"predict")};
-document.querySelectorAll("nav [data-p]").forEach(b=>b.onclick=()=>{show(b.dataset.p);if(b.dataset.p==="history")loadHist();if(b.dataset.p==="admin")loadAdmin()});
-function clearAll(){Object.keys(F).forEach(k=>{$("f_"+k).value="";$("f_"+k).classList.remove("bad");$("e_"+k).textContent=""});$("result").classList.add("hide");$("predErr").textContent=""}
-$("clear").onclick=clearAll;
-$("go").onclick=async()=>{const body={model:$("model").value};Object.keys(F).forEach(k=>{const v=$("f_"+k).value;body[k]=v===""?null:Number(v);$("f_"+k).classList.remove("bad");$("e_"+k).textContent=""});$("predErr").textContent="";
-const r=await api("POST","/predictions",body);
-if(r.status===400&&r.j.fields){for(const[k,m]of Object.entries(r.j.fields)){$("f_"+k).classList.add("bad");$("e_"+k).textContent=m}return}
-if(!r.ok){$("predErr").textContent=r.j.message;return}
-const p=r.j;$("rLabel").textContent=p.label;$("rProb").textContent="Probability: "+p.probability.toFixed(1)+"%";$("rRisk").textContent="Risk: "+p.risk+" · model "+p.model_version;
-$("rFeat").replaceChildren(...p.top_features.map(f=>{const li=document.createElement("li");li.textContent=f.name+" — "+f.direction+" risk";return li}));$("rDisc").textContent=p.disclaimer;$("result").classList.remove("hide")};
-async function loadHist(){const r=await api("GET","/predictions?page="+page);if(!r.ok)return;$("hBody").replaceChildren(...r.j.items.map(p=>{const tr=document.createElement("tr");[new Date(p.created_at+"Z").toLocaleString(),p.label,p.probability.toFixed(1)+"%",p.risk,p.model_version].forEach(t=>{const td=document.createElement("td");td.textContent=t;tr.appendChild(td)});return tr}))}
-$("prev").onclick=()=>{if(page>1){page--;loadHist()}};$("next").onclick=()=>{page++;loadHist()};
-function row(vals,btn){const tr=document.createElement("tr");vals.forEach(t=>{const td=document.createElement("td");td.textContent=t;tr.appendChild(td)});if(btn){const td=document.createElement("td");td.appendChild(btn);tr.appendChild(td)}return tr}
-async function loadAdmin(){let r=await api("GET","/models");if(r.ok)$("mBody").replaceChildren(...r.j.map(m=>{const b=document.createElement("button");b.textContent=m.is_active?"Active":"Activate";b.disabled=m.is_active;b.onclick=async()=>{const x=await api("PUT","/models/"+m.id+"/activate");if(!x.ok)$("adErr").textContent=x.j.message;loadAdmin()};return row([m.type,m.version,m.status],b)}));
-r=await api("GET","/admin/audit-logs");if(r.ok)$("lBody").replaceChildren(...r.j.map(l=>row([l.timestamp,l.user_id,l.action,l.ip])))}
-$("mkUser").onclick=async()=>{const r=await api("POST","/admin/users",{username:$("nu").value,password:$("np").value,role:$("nr").value});$("adErr").textContent=r.ok?"User created.":r.j.message;loadAdmin()};
-</script></body></html>
+        <section id="historyPage" class="page hidden">
+          <div class="page-heading"><div><div class="eyebrow">Records</div><h1>Prediction history</h1><p class="muted">Your most recent prediction records, newest first.</p></div><button id="refreshHistory" class="btn btn-secondary" type="button">Refresh</button></div>
+          <div class="card">
+            <div class="card-head"><div><h2>My predictions</h2><p class="muted">Up to 20 records per page.</p></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Date and time</th><th>Prediction</th><th>Probability</th><th>Risk</th><th>Model</th><th>Reference</th></tr></thead><tbody id="historyBody"><tr><td colspan="6" class="table-empty">No records loaded.</td></tr></tbody></table></div>
+            <div class="pagination"><span id="pageLabel" class="muted">Page 1</span><button id="prevPage" class="btn btn-secondary btn-small" type="button">Previous</button><button id="nextPage" class="btn btn-secondary btn-small" type="button">Next</button></div>
+            <div id="historyMessage" class="message" role="status"></div>
+          </div>
+        </section>
+
+        <section id="adminPage" class="page hidden">
+          <div class="page-heading"><div><div class="eyebrow">Access control</div><h1>Administration</h1><p class="muted">Create application accounts and review audit activity.</p></div></div>
+          <div class="card">
+            <div class="card-head"><div><h2>Create user</h2><p class="muted">Passwords must meet the server-side complexity policy.</p></div></div>
+            <form id="createUserForm">
+              <div class="inline-fields">
+                <div class="field"><label for="newUsername">Username</label><input id="newUsername" required maxlength="64"></div>
+                <div class="field"><label for="newPassword">Temporary password</label><input id="newPassword" type="password" required autocomplete="new-password"></div>
+                <div class="field"><label for="newRole">Role</label><select id="newRole"><option>Clinician</option><option>Administrator</option><option>ML Engineer</option></select></div>
+                <button class="btn btn-primary" type="submit">Create user</button>
+              </div>
+              <div id="adminMessage" class="message" role="status"></div>
+            </form>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h2>Model registry</h2><p class="muted">Only validated models can be activated.</p></div><button id="refreshAdmin" class="btn btn-secondary btn-small" type="button">Refresh</button></div>
+            <div class="table-wrap"><table><thead><tr><th>Type</th><th>Version</th><th>Status</th><th>Active</th><th>Action</th></tr></thead><tbody id="adminModelsBody"></tbody></table></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h2>Audit log</h2><p class="muted">Latest application events.</p></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Timestamp</th><th>User ID</th><th>Action</th><th>IP address</th></tr></thead><tbody id="auditBody"></tbody></table></div>
+          </div>
+        </section>
+
+        <section id="modelsPage" class="page hidden">
+          <div class="page-heading"><div><div class="eyebrow">Model operations</div><h1>Model registry</h1><p class="muted">Inspect registered model versions and validation state.</p></div><button id="refreshModels" class="btn btn-secondary" type="button">Refresh</button></div>
+          <div class="card"><div class="table-wrap"><table><thead><tr><th>Type</th><th>Version</th><th>Status</th><th>Active</th></tr></thead><tbody id="modelsBody"></tbody></table></div><div id="modelsMessage" class="message" role="status"></div></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    "use strict";
+
+    const $ = (id) => document.getElementById(id);
+    const FIELD_IDS = [
+      "age", "sex", "chest_pain_type", "resting_bp", "cholesterol", "fasting_bs",
+      "resting_ecg", "max_hr", "exercise_angina", "oldpeak", "st_slope"
+    ];
+    const state = { token: null, role: null, page: 1, idleTimer: null, historyHasNext: false };
+
+    function setMessage(id, message, kind = "error") {
+      const node = $(id);
+      node.textContent = message || "";
+      node.className = message ? `alert ${kind === "success" ? "alert-success" : "alert-error"}` : "message";
+    }
+
+    function showLogin() {
+      clearTimeout(state.idleTimer);
+      state.token = null;
+      state.role = null;
+      $("appView").classList.add("hidden");
+      $("loginView").classList.remove("hidden");
+      $("password").value = "";
+      $("loginMessage").textContent = "";
+    }
+
+    function scheduleIdleLogout() {
+      clearTimeout(state.idleTimer);
+      state.idleTimer = setTimeout(showLogin, 15 * 60 * 1000);
+    }
+
+    async function api(method, path, body) {
+      const headers = { "Content-Type": "application/json" };
+      if (state.token) headers.Authorization = `Bearer ${state.token}`;
+      let response;
+      try {
+        response = await fetch(`/api/v1${path}`, {
+          method, headers, body: body === undefined ? undefined : JSON.stringify(body)
+        });
+      } catch {
+        throw new Error("Cannot reach the application server. Check that the Flask server is running.");
+      }
+
+      const refreshedToken = response.headers.get("X-Token");
+      if (refreshedToken) {
+        state.token = refreshedToken;
+        scheduleIdleLogout();
+      }
+      if (response.status === 401 && state.token) showLogin();
+
+      let payload = null;
+      if (response.status !== 204) {
+        try { payload = await response.json(); } catch { payload = null; }
+      }
+      if (!response.ok) {
+        const message = payload?.message || payload?.error || `Request failed (${response.status}).`;
+        const error = new Error(message);
+        error.status = response.status;
+        error.payload = payload;
+        throw error;
+      }
+      return payload;
+    }
+
+    function switchPage(pageId) {
+      document.querySelectorAll(".page").forEach(page => page.classList.toggle("hidden", page.id !== pageId));
+      document.querySelectorAll(".nav-btn").forEach(button => button.classList.toggle("active", button.dataset.page === pageId));
+      $("sidebar").classList.remove("open");
+      if (pageId === "historyPage") { state.page = 1; loadHistory(); }
+      if (pageId === "adminPage") loadAdmin();
+      if (pageId === "modelsPage") loadModels();
+    }
+
+    function configureRole(role) {
+      state.role = role;
+      $("roleChip").textContent = role;
+      const canPredict = role === "Clinician" || role === "ML Engineer";
+      const canHistory = role === "Clinician" || role === "Administrator";
+      $("historyNav").classList.toggle("hidden", !canHistory);
+      $("adminNav").classList.toggle("hidden", role !== "Administrator");
+      $("modelsNav").classList.toggle("hidden", role !== "Administrator" && role !== "ML Engineer");
+      document.querySelector('[data-page="predictPage"]').classList.toggle("hidden", !canPredict);
+      $("appView").classList.remove("hidden");
+      $("loginView").classList.add("hidden");
+      switchPage(role === "Administrator" ? "historyPage" : canPredict ? "predictPage" : "modelsPage");
+    }
+
+    $("loginForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = $("loginButton");
+      button.disabled = true;
+      $("loginMessage").textContent = "";
+      try {
+        const result = await api("POST", "/auth/login", {
+          username: $("username").value.trim(), password: $("password").value
+        });
+        state.token = result.token;
+        scheduleIdleLogout();
+        configureRole(result.role);
+      } catch (error) {
+        setMessage("loginMessage", error.message);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    $("logoutButton").addEventListener("click", async () => {
+      try { if (state.token) await api("POST", "/auth/logout"); }
+      catch { /* Local logout must still complete if the server is unavailable. */ }
+      showLogin();
+    });
+
+    $("navigation").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-page]");
+      if (button && !button.classList.contains("hidden")) switchPage(button.dataset.page);
+    });
+
+    $("mobileMenu").addEventListener("click", () => $("sidebar").classList.toggle("open"));
+    $("themeToggle").addEventListener("click", () => {
+      const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      document.documentElement.dataset.theme = next;
+      try { localStorage.setItem("ischemia-theme", next); } catch { /* Storage may be disabled. */ }
+    });
+    try {
+      const savedTheme = localStorage.getItem("ischemia-theme");
+      if (savedTheme === "dark") document.documentElement.dataset.theme = "dark";
+    } catch { /* Theme preference is optional. */ }
+
+    function collectPrediction() {
+      const values = {};
+      for (const field of FIELD_IDS) {
+        const control = $(`f_${field}`);
+        control.setAttribute("aria-invalid", "false");
+        if (control.value === "") {
+          control.setAttribute("aria-invalid", "true");
+          control.focus();
+          throw new Error(`Please complete the ${field.replaceAll("_", " ")} field.`);
+        }
+        values[field] = Number(control.value);
+      }
+      values.model = $("model").value;
+      return values;
+    }
+
+    function renderPrediction(result) {
+      $("resultCard").classList.remove("hidden");
+      $("resultId").textContent = `Reference: ${result.prediction_id || "Not supplied"}`;
+      $("resultLabel").textContent = result.label || "Prediction returned";
+      const probability = Number(result.probability);
+      $("resultProbability").textContent = Number.isFinite(probability) ? `${probability.toFixed(1)}%` : "Not available";
+      $("probabilityBar").style.width = `${Math.max(0, Math.min(100, probability || 0))}%`;
+      $("resultModel").textContent = `Model version: ${result.model_version || "Not supplied"}`;
+      const risk = String(result.risk || "Unknown");
+      $("riskBadge").textContent = `${risk} risk`;
+      $("riskBadge").className = `risk-pill ${risk.toLowerCase() === "low" ? "risk-low" : risk.toLowerCase() === "high" ? "risk-high" : "risk-moderate"}`;
+
+      const features = Array.isArray(result.top_features) ? result.top_features : [];
+      $("featureList").replaceChildren();
+      if (!features.length) {
+        const item = document.createElement("li");
+        item.textContent = "Feature contribution details were not returned.";
+        $("featureList").append(item);
+      } else {
+        for (const feature of features) {
+          const item = document.createElement("li");
+          const name = document.createElement("span");
+          const direction = document.createElement("strong");
+          name.textContent = feature.name || "Feature";
+          direction.textContent = feature.direction || "Not specified";
+          item.append(name, direction);
+          $("featureList").append(item);
+        }
+      }
+      $("resultDisclaimer").textContent = result.disclaimer || "Decision-support output; not a substitute for professional medical diagnosis.";
+      $("resultCard").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    $("predictionForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = $("predictButton");
+      button.disabled = true;
+      setMessage("predictionMessage", "");
+      $("resultCard").classList.add("hidden");
+      try {
+        const payload = collectPrediction();
+        const result = await api("POST", "/predictions", payload);
+        renderPrediction(result);
+      } catch (error) {
+        if (error.status === 400 && error.payload?.fields) {
+          const first = Object.entries(error.payload.fields)[0];
+          if (first) {
+            const control = $(`f_${first[0]}`);
+            if (control) { control.setAttribute("aria-invalid", "true"); control.focus(); }
+          }
+        }
+        setMessage("predictionMessage", error.message);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    $("clearButton").addEventListener("click", () => {
+      $("resultCard").classList.add("hidden");
+      $("predictionMessage").textContent = "";
+      FIELD_IDS.forEach(field => $(`f_${field}`).setAttribute("aria-invalid", "false"));
+    });
+
+    function addCell(row, value) {
+      const cell = document.createElement("td");
+      cell.textContent = value ?? "—";
+      row.append(cell);
+    }
+
+    function emptyRow(bodyId, columns, message) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = columns;
+      cell.className = "table-empty";
+      cell.textContent = message;
+      row.append(cell);
+      $(bodyId).replaceChildren(row);
+    }
+
+    function formatDate(value) {
+      if (!value) return "—";
+      const date = new Date(value.endsWith("Z") ? value : `${value}Z`);
+      return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+    }
+
+    function riskCell(row, risk) {
+      const cell = document.createElement("td");
+      const badge = document.createElement("span");
+      const value = String(risk || "Unknown");
+      badge.className = `risk-pill ${value.toLowerCase() === "low" ? "risk-low" : value.toLowerCase() === "high" ? "risk-high" : "risk-moderate"}`;
+      badge.textContent = value;
+      cell.append(badge);
+      row.append(cell);
+    }
+
+    async function loadHistory() {
+      setMessage("historyMessage", "");
+      $("prevPage").disabled = state.page <= 1;
+      $("nextPage").disabled = true;
+      try {
+        const data = await api("GET", `/predictions?page=${state.page}`);
+        const items = Array.isArray(data.items) ? data.items : [];
+        state.historyHasNext = items.length === 20;
+        $("pageLabel").textContent = `Page ${data.page || state.page}`;
+        $("prevPage").disabled = state.page <= 1;
+        $("nextPage").disabled = !state.historyHasNext;
+        if (!items.length) {
+          emptyRow("historyBody", 6, state.page === 1 ? "No predictions recorded yet." : "No more records.");
+          return;
+        }
+        const rows = items.map(item => {
+          const row = document.createElement("tr");
+          addCell(row, formatDate(item.created_at));
+          addCell(row, item.label);
+          addCell(row, Number(item.probability).toFixed(1) + "%");
+          riskCell(row, item.risk);
+          addCell(row, item.model_version);
+          addCell(row, item.prediction_id);
+          return row;
+        });
+        $("historyBody").replaceChildren(...rows);
+      } catch (error) {
+        emptyRow("historyBody", 6, "Unable to load prediction history.");
+        setMessage("historyMessage", error.message);
+      }
+    }
+
+    $("prevPage").addEventListener("click", () => {
+      if (state.page > 1) { state.page--; loadHistory(); }
+    });
+    $("nextPage").addEventListener("click", () => {
+      if (state.historyHasNext) { state.page++; loadHistory(); }
+    });
+    $("refreshHistory").addEventListener("click", loadHistory);
+
+    async function loadModelRows(bodyId, allowActivation) {
+      const models = await api("GET", "/models");
+      const entries = Array.isArray(models) ? models : [];
+      if (!entries.length) { emptyRow(bodyId, allowActivation ? 5 : 4, "No models are registered."); return; }
+      const rows = entries.map(model => {
+        const row = document.createElement("tr");
+        addCell(row, model.type);
+        addCell(row, model.version);
+        addCell(row, model.status);
+        addCell(row, model.is_active ? "Active" : "Inactive");
+        if (allowActivation) {
+          const cell = document.createElement("td");
+          const button = document.createElement("button");
+          button.className = "btn btn-secondary btn-small";
+          button.type = "button";
+          button.textContent = model.is_active ? "Active" : "Activate";
+          button.disabled = model.is_active || model.status !== "validated";
+          button.addEventListener("click", async () => {
+            button.disabled = true;
+            try {
+              await api("PUT", `/models/${model.id}/activate`);
+              await loadAdmin();
+            } catch (error) {
+              setMessage("adminMessage", error.message);
+              button.disabled = false;
+            }
+          });
+          cell.append(button);
+          row.append(cell);
+        }
+        return row;
+      });
+      $(bodyId).replaceChildren(...rows);
+    }
+
+    async function loadModels() {
+      setMessage("modelsMessage", "");
+      try { await loadModelRows("modelsBody", false); }
+      catch (error) { emptyRow("modelsBody", 4, "Unable to load model registry."); setMessage("modelsMessage", error.message); }
+    }
+
+    async function loadAdmin() {
+      setMessage("adminMessage", "");
+      try {
+        await loadModelRows("adminModelsBody", true);
+        const logs = await api("GET", "/admin/audit-logs");
+        if (!Array.isArray(logs) || !logs.length) { emptyRow("auditBody", 4, "No audit events found."); return; }
+        const rows = logs.map(log => {
+          const row = document.createElement("tr");
+          addCell(row, formatDate(log.timestamp));
+          addCell(row, log.user_id);
+          addCell(row, log.action);
+          addCell(row, log.ip);
+          return row;
+        });
+        $("auditBody").replaceChildren(...rows);
+      } catch (error) {
+        setMessage("adminMessage", error.message);
+      }
+    }
+
+    $("createUserForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      setMessage("adminMessage", "");
+      try {
+        await api("POST", "/admin/users", {
+          username: $("newUsername").value.trim(),
+          password: $("newPassword").value,
+          role: $("newRole").value
+        });
+        $("createUserForm").reset();
+        setMessage("adminMessage", "User created successfully.", "success");
+      } catch (error) {
+        setMessage("adminMessage", error.message);
+      }
+    });
+    $("refreshAdmin").addEventListener("click", loadAdmin);
+    $("refreshModels").addEventListener("click", loadModels);
+  </script>
+</body>
+</html>
