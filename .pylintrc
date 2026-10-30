@@ -1,0 +1,32 @@
+[MASTER]
+ignore=venv,.venv,build
+
+[FORMAT]
+max-line-length=120
+
+[BASIC]
+# ML convention: X, Xtr, Z, etc. are fine
+good-names=X,Xe,Xtr,Xte,Ztr,Zte,Z,y,i,j,k,df
+argument-rgx=[a-z_][a-z0-9_]{0,30}$|X
+variable-rgx=[a-zA-Z_][a-zA-Z0-9_]{0,30}$
+
+[TYPECHECK]
+# pennylane.numpy wraps autograd, so pylint can't see members like mean
+ignored-modules=pennylane.numpy
+
+[DESIGN]
+max-args=8
+max-positional-arguments=8
+max-attributes=12
+max-locals=30
+max-statements=60
+max-returns=8
+min-public-methods=0
+
+[MESSAGES CONTROL]
+# Pytest fixtures and imports inside tests trigger these constantly
+disable=
+    redefined-outer-name,
+    import-outside-toplevel,
+    missing-function-docstring,
+    missing-class-docstring
