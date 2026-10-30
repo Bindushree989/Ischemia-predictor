@@ -457,21 +457,88 @@
       if (savedTheme === "dark") document.documentElement.dataset.theme = "dark";
     } catch { /* Theme preference is optional. */ }
 
-    function collectPrediction() {
-      const values = {};
-      for (const field of FIELD_IDS) {
+    // Attach accessible inline validation messages to all clinical inputs.
+    function initializeFieldValidation() {
+      FIELD_IDS.forEach((field) => {
         const control = $(`f_${field}`);
+        if ($(`error_${field}`)) return;
+
+        const error = document.createElement("div");
+        error.id = `error_${field}`;
+        error.className = "field-error";
+        error.setAttribute("aria-live", "polite");
+        control.insertAdjacentElement("afterend", error);
+        control.setAttribute("aria-describedby", error.id);
+
+        const clearError = () => {
+          control.setAttribute("aria-invalid", "false");
+          control.setCustomValidity("");
+          error.textContent = "";
+        };
+        control.addEventListener("input", clearError);
+        control.addEventListener("change", clearError);
+      });
+    }
+
+    function setFieldError(field, message) {
+      const control = $(`f_${field}`);
+      const error = $(`error_${field}`);
+      if (!control || !error) return;
+      control.setAttribute("aria-invalid", "true");
+      control.setCustomValidity(message);
+      error.textContent = message;
+    }
+
+    function validateClinicalInputs() {
+      let firstInvalid = null;
+      FIELD_IDS.forEach((field) => {
+        const control = $(`f_${field}`);
+        const error = $(`error_${field}`);
         control.setAttribute("aria-invalid", "false");
-        if (control.value === "") {
-          control.setAttribute("aria-invalid", "true");
-          control.focus();
-          throw new Error(`Please complete the ${field.replaceAll("_", " ")} field.`);
+        control.setCustomValidity("");
+        error.textContent = "";
+
+        if (!control.checkValidity()) {
+          let message = "Enter a valid value.";
+          if (control.validity.valueMissing) message = "This measurement is required.";
+          else if (control.validity.rangeUnderflow) message = `Minimum value is ${control.min}.`;
+          else if (control.validity.rangeOverflow) message = `Maximum value is ${control.max}.`;
+          else if (control.validity.badInput || control.validity.stepMismatch) message = "Enter a valid numeric value.";
+          setFieldError(field, message);
+          if (!firstInvalid) firstInvalid = control;
         }
-        values[field] = Number(control.value);
+      });
+
+      if (firstInvalid) {
+        firstInvalid.focus();
+        return false;
       }
+      return true;
+    }
+
+    function collectPrediction() {
+      if (!validateClinicalInputs()) {
+        throw new Error("Review the highlighted fields before running the prediction.");
+      }
+      const values = {};
+      FIELD_IDS.forEach((field) => {
+        values[field] = Number($(`f_${field}`).value);
+      });
       values.model = $("model").value;
       return values;
     }
+
+    function applyServerFieldErrors(fields) {
+      let firstInvalid = null;
+      Object.entries(fields || {}).forEach(([field, message]) => {
+        if (!FIELD_IDS.includes(field)) return;
+        setFieldError(field, String(message));
+        if (!firstInvalid) firstInvalid = $(`f_${field}`);
+      });
+      if (firstInvalid) firstInvalid.focus();
+    }
+
+    initializeFieldValidation();
 
     function renderPrediction(result) {
       $("resultCard").classList.remove("hidden");
@@ -518,11 +585,7 @@
         renderPrediction(result);
       } catch (error) {
         if (error.status === 400 && error.payload?.fields) {
-          const first = Object.entries(error.payload.fields)[0];
-          if (first) {
-            const control = $(`f_${first[0]}`);
-            if (control) { control.setAttribute("aria-invalid", "true"); control.focus(); }
-          }
+          applyServerFieldErrors(error.payload.fields);
         }
         setMessage("predictionMessage", error.message);
       } finally {
@@ -533,7 +596,12 @@
     $("clearButton").addEventListener("click", () => {
       $("resultCard").classList.add("hidden");
       $("predictionMessage").textContent = "";
-      FIELD_IDS.forEach(field => $(`f_${field}`).setAttribute("aria-invalid", "false"));
+      FIELD_IDS.forEach((field) => {
+        const control = $(`f_${field}`);
+        control.setAttribute("aria-invalid", "false");
+        control.setCustomValidity("");
+        $(`error_${field}`).textContent = "";
+      });
     });
 
     function addCell(row, value) {
