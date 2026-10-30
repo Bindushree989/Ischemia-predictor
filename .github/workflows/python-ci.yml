@@ -42,5 +42,5 @@ jobs:
       - name: Bandit security scan
         run: bandit -r . -x ./tests,./venv -ll -s B104
 
-      - name: Run unit tests (unittest)
-        run: python -m unittest discover -s tests -v
+      - name: Run tests
+        run: python -m pytest -v
