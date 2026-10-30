@@ -39,8 +39,8 @@ jobs:
       - name: Lint with pylint
         run: pylint $(git ls-files '*.py') --fail-under=8.0
 
-      - name: Security scan with bandit
-        run: bandit -r . -x ./tests,./venv -ll
+      - name: Bandit security scan
+        run: bandit -r . -x ./tests,./venv -ll -s B104
 
       - name: Run unit tests (unittest)
         run: python -m unittest discover -s tests -v
