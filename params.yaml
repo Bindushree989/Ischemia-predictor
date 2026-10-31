@@ -1,0 +1,3 @@
+train:
+  qml_samples: 300
+  mlflow_experiment: ischemia-predictor

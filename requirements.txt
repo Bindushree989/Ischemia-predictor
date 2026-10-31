@@ -13,3 +13,5 @@ pennylane
 pytest
 gunicorn
 psycopg2-binary
+dvc>=3.0,<4
+mlflow>=2.12,<4

@@ -1,0 +1,20 @@
+stages:
+  train:
+    cmd: python -m training.train --data data/heart.csv --models models --qml-samples ${train.qml_samples} --experiment ${train.mlflow_experiment}
+    deps:
+      - common/features.py
+      - common/preprocess.py
+      - common/qml_model.py
+      - data/heart.csv
+      - requirements.txt
+      - training/train.py
+    params:
+      - train.qml_samples
+      - train.mlflow_experiment
+    outs:
+      - models/dl-1.0.joblib
+      - models/heldout.csv
+      - models/ml-1.0.joblib
+      - models/pipeline-1.0.joblib
+      - models/qml-1.0.joblib
+      - models/registry.json

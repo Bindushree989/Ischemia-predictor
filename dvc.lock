@@ -1,0 +1,64 @@
+schema: '2.0'
+stages:
+  train:
+    cmd: "python -m training.train --data data/heart.csv --models models --qml-samples 300 --experiment ischemia-predictor"
+    deps:
+    - path: common/features.py
+      hash: md5
+      md5: 7b5c751331264b7a6e72cde415a78102
+      size: 2066
+      isexec: true
+    - path: common/preprocess.py
+      hash: md5
+      md5: bba77ca9649b7e3d4dbd23a730b4fc32
+      size: 787
+      isexec: true
+    - path: common/qml_model.py
+      hash: md5
+      md5: eb9ea04b0fb936e26af949c06524ac15
+      size: 2031
+      isexec: true
+    - path: data/heart.csv
+      hash: md5
+      md5: f7265baea21f70575307f56c82ee5e66
+      size: 36840
+      isexec: true
+    - path: requirements.txt
+      hash: md5
+      md5: c3baca5ee02432602e4870a3cd77762d
+      size: 184
+      isexec: true
+    - path: training/train.py
+      hash: md5
+      md5: 42e01f38358582e02868c7eb6ab7fa37
+      size: 6409
+      isexec: true
+    params:
+      params.yaml:
+        train.mlflow_experiment: ischemia-predictor
+        train.qml_samples: 300
+    outs:
+    - path: models/dl-1.0.joblib
+      hash: md5
+      md5: 9848a72d533f9433368c916f667efc79
+      size: 21160
+    - path: models/heldout.csv
+      hash: md5
+      md5: a643ef3268d5ddf34ed361d395a9f5d5
+      size: 10005
+    - path: models/ml-1.0.joblib
+      hash: md5
+      md5: 30d2a11093b37fdbb7f601f0f0b22a7e
+      size: 5234601
+    - path: models/pipeline-1.0.joblib
+      hash: md5
+      md5: 429d9409d65473012a881f2a463494ed
+      size: 1321
+    - path: models/qml-1.0.joblib
+      hash: md5
+      md5: 079e70c52add99bb6052b00b225ccd44
+      size: 808
+    - path: models/registry.json
+      hash: md5
+      md5: f5ba2270a896d7b14570204477aede07
+      size: 1196

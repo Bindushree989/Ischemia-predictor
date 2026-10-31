@@ -8,8 +8,8 @@ Dataset: `data/heart.csv` (918 patients, 11 inputs, label `HeartDisease`). Pytho
 ```powershell
 python -m venv .venv
 .venv\Scripts\activate
-pip install numpy pandas scipy scikit-learn joblib flask flask-sqlalchemy bcrypt PyJWT requests cryptography pennylane pytest
-python -m training.train --data data/heart.csv --models models
+pip install -r requirements.txt
+dvc repro
 python -m scripts.create_user admin Administrator 'Adm1n!Passw0rd'
 python -m scripts.create_user doc1 Clinician 'Cl1nician!Pass'
 ```
@@ -31,9 +31,112 @@ Restart all terminals after retraining.
 ## Tests
 `pytest -q`  (automated checks for TC-01..05, 07, 09, 10, 11, 17, 21)
 
-## Docker (optional)
-`docker compose up --build`. Set real `SECRET_KEY` and `DATA_KEY` first
-(`python -c "import os;print(os.urandom(32).hex())"`). Kubernetes manifests are not included.
+## Start the whole application (Windows PowerShell)
+Install Docker Desktop for Windows with Winget (`winget install --id Docker.DockerDesktop`)
+or the official installer, then launch it and wait until its engine is running. Docker
+Desktop includes Docker Compose and `kubectl`. Start the Compose application with one
+command from the repository root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1
+```
+
+The script checks Docker and the DVC configuration, creates `.env` with fresh secrets
+if needed, starts MLflow, runs `dvc repro`, builds and starts PostgreSQL and the
+web/ML/DL/QML services, waits for the UI to respond, and prompts for a Clinician account.
+Account passwords are sent to the container through standard input; an existing account
+is left unchanged. The password must have at least 10 characters, including uppercase,
+lowercase, a digit, and a symbol. Open the app at http://localhost:5000 and MLflow at
+http://localhost:5001.
+
+To stop the app, run `docker compose down`. PostgreSQL data is kept in the
+`postgres_data` named volume; `docker compose down -v` also deletes that database.
+
+## Docker Compose details
+The image contains the web gateway, all three model services, and the trained model
+artifacts from `models/`. Compose starts distinct ML, DL, and QML containers, PostgreSQL,
+the web gateway, and MLflow; the web UI is published on port 5000 and MLflow is restricted
+to localhost on port 5001. The host `models/` directory is shared with the containers
+(read-only in the prediction services), so the gateway and all model services see the
+same registry and artifacts.
+
+For manual configuration, copy `.env.example` to `.env` and replace its values with
+unique secrets. `DATA_KEY` must be exactly 64 hexadecimal characters (32 bytes). Keep
+`.env` private.
+
+## DVC and MLflow status
+DVC tracks the training stage and generated model artifacts in `dvc.yaml` and `dvc.lock`;
+the dataset remains Git-versioned and is recorded as a training dependency. DVC's local
+cache is under `.dvc/cache` and is ignored by Git. To reproduce training manually with the
+Docker Compose environment, run `docker compose run --rm trainer`. No shared DVC remote
+is configured, so sharing the cache across machines requires configuring and securing a
+remote with `dvc remote add` and `dvc push`.
+
+MLflow is a Compose service at http://localhost:5001. It stores run metadata in a
+persistent local SQLite database and proxies run artifacts into the `mlflow_data` volume.
+The training pipeline logs one MLflow run per ML, DL, and QML model, including dataset
+hash, validation status, accuracy, recall, precision, F1, ROC AUC, model-specific
+parameters, registry entry, model, and preprocessing artifacts. The startup script waits
+for MLflow, runs `dvc repro`, then starts the
+application. DVC and MLflow state are local-only; configure a shared DVC remote and
+authenticated, durable MLflow backend/artifact storage before using them across machines
+or in production. Existing runs made before artifact-proxy configuration are retained in
+the previous SQLite file; new runs use the correctly proxied artifact store.
+
+## Enable Kubernetes
+Docker Desktop's Kubernetes cluster is optional for the one-command Compose workflow.
+To run the Kubernetes deployment, open Docker Desktop **Settings > Kubernetes**, enable
+Kubernetes, and apply/restart. Wait for the cluster to become Ready, then apply the
+manifest below. This creates the `ischemia-app` ServiceAccount and assigns it to the app
+pods; the service account has no Kubernetes API permissions and does not mount a token.
+
+## Kubernetes deployment
+`k8s/deployment.yaml` defines PostgreSQL with persistent storage, the web gateway, and
+separate internal Services and Deployments for ML, DL, and QML. The model services have
+readiness/liveness probes; the web service is a ClusterIP and is not exposed publicly
+by default. Pods use the dedicated `ischemia-app` Kubernetes ServiceAccount, with
+automatic API token mounting disabled because the app does not call the Kubernetes API.
+
+With Docker Desktop Kubernetes enabled, build the image from the repository root; the
+cluster uses the same Docker Desktop image store. Ensure model files exist first by
+installing the project requirements and running `dvc repro`; a fresh checkout regenerates
+them locally because no shared DVC remote is configured. Docker Desktop's `docker.exe` and
+`kubectl.exe` may not be on `PATH`, so add their bundled directory in PowerShell:
+
+```powershell
+$dockerBin = Join-Path $env:ProgramFiles "Docker\Docker\resources\bin"
+$env:PATH = "$dockerBin;$env:PATH"
+docker build -t ischemia-predictor:local .
+```
+
+Create Kubernetes secrets (use fresh values; `DATA_KEY` must be 64 hex characters):
+
+```powershell
+kubectl create namespace ischemia
+$postgresPassword = python -c "import secrets; print(secrets.token_hex(32))"
+$secretKey = python -c "import secrets; print(secrets.token_hex(32))"
+$dataKey = python -c "import secrets; print(secrets.token_hex(32))"
+kubectl create secret generic ischemia-secrets -n ischemia `
+  --from-literal=postgres-password=$postgresPassword `
+  --from-literal=secret-key=$secretKey `
+  --from-literal=data-key=$dataKey
+kubectl apply -f k8s/deployment.yaml
+kubectl rollout status deployment/web -n ischemia
+kubectl port-forward service/web 5000:80 -n ischemia
+```
+
+Open http://localhost:5000. For a remote cluster, build and push the image to a registry
+accessible to the cluster, then replace `ischemia-predictor:local` in the manifest with
+the registry image reference. Configure ingress/TLS separately for public access.
+Kubernetes secret resources are only base64-encoded by default; enable cluster secret
+encryption and restrict RBAC access in production. PostgreSQL storage availability and
+size depend on the cluster's default StorageClass.
+
+Kubernetes packages model artifacts in the image. When replacing model artifacts, rebuild
+and redeploy the image so the gateway and each model service receive the same
+`models/registry.json` and model files. Use this image-based workflow for model updates
+in Kubernetes; unlike Compose, the Kubernetes manifest does not mount a shared writable
+host `models/` directory.
 
 ## Deviations from the SRS/SAD (explain in the demo)
 - Dataset: heart.csv (918 rows). Its label is "heart disease", used as the proxy for ischemia.
@@ -43,4 +146,4 @@ Restart all terminals after retraining.
 - QML = PennyLane simulator, 4 qubits, 3 layers; it is less accurate and may stay `unvalidated`.
 - Top-5 feature explanation = leave-one-out attribution (same method for all models).
 - Dev server uses HTTP; TLS is expected at the ingress/reverse proxy. Rate limit is in-memory.
-- Not implemented: pseudonymous-ID replacement (SEC-10), Kubernetes manifests, log-retention job.
+- Not implemented: pseudonymous-ID replacement (SEC-10), log-retention job.
