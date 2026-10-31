@@ -1,0 +1,413 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ischemia
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ischemia-config
+  namespace: ischemia
+data:
+  ML_URL: http://ml:5001
+  DL_URL: http://dl:5001
+  QML_URL: http://qml:5001
+  MODELS_DIR: /app/models
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ischemia-app
+  namespace: ischemia
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: ischemia
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: ischemia
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      serviceAccountName: ischemia-app
+      containers:
+        - name: postgres
+          image: postgres:15
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: ischemia
+            - name: POSTGRES_DB
+              value: ischemia
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ischemia-secrets
+                  key: postgres-password
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          startupProbe:
+            exec:
+              command: ["pg_isready", "-U", "ischemia", "-d", "ischemia"]
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ischemia", "-d", "ischemia"]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ischemia", "-d", "ischemia"]
+            periodSeconds: 20
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: ischemia
+spec:
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml
+  namespace: ischemia
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ml
+  template:
+    metadata:
+      labels:
+        app: ml
+    spec:
+      serviceAccountName: ischemia-app
+      containers:
+        - name: ml
+          image: ischemia-predictor:local
+          imagePullPolicy: IfNotPresent
+          command: ["gunicorn", "--bind", "0.0.0.0:5001", "services.model_service:app"]
+          ports:
+            - name: http
+              containerPort: 5001
+          env:
+            - name: MODEL_TYPE
+              value: ML
+            - name: MODELS_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: ischemia-config
+                  key: MODELS_DIR
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml
+  namespace: ischemia
+spec:
+  selector:
+    app: ml
+  ports:
+    - name: http
+      port: 5001
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dl
+  namespace: ischemia
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dl
+  template:
+    metadata:
+      labels:
+        app: dl
+    spec:
+      serviceAccountName: ischemia-app
+      containers:
+        - name: dl
+          image: ischemia-predictor:local
+          imagePullPolicy: IfNotPresent
+          command: ["gunicorn", "--bind", "0.0.0.0:5001", "services.model_service:app"]
+          ports:
+            - name: http
+              containerPort: 5001
+          env:
+            - name: MODEL_TYPE
+              value: DL
+            - name: MODELS_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: ischemia-config
+                  key: MODELS_DIR
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dl
+  namespace: ischemia
+spec:
+  selector:
+    app: dl
+  ports:
+    - name: http
+      port: 5001
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qml
+  namespace: ischemia
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qml
+  template:
+    metadata:
+      labels:
+        app: qml
+    spec:
+      serviceAccountName: ischemia-app
+      containers:
+        - name: qml
+          image: ischemia-predictor:local
+          imagePullPolicy: IfNotPresent
+          command: ["gunicorn", "--bind", "0.0.0.0:5001", "services.model_service:app"]
+          ports:
+            - name: http
+              containerPort: 5001
+          env:
+            - name: MODEL_TYPE
+              value: QML
+            - name: MODELS_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: ischemia-config
+                  key: MODELS_DIR
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qml
+  namespace: ischemia
+spec:
+  selector:
+    app: qml
+  ports:
+    - name: http
+      port: 5001
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: ischemia
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      serviceAccountName: ischemia-app
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:15
+          command:
+            - sh
+            - -c
+            - until pg_isready -h postgres -U ischemia -d ischemia; do sleep 2; done
+      containers:
+        - name: web
+          image: ischemia-predictor:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 5000
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ischemia-secrets
+                  key: postgres-password
+            - name: DATABASE_URL
+              value: postgresql+psycopg2://ischemia:$(POSTGRES_PASSWORD)@postgres:5432/ischemia
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ischemia-secrets
+                  key: secret-key
+            - name: DATA_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ischemia-secrets
+                  key: data-key
+            - name: ML_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ischemia-config
+                  key: ML_URL
+            - name: DL_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ischemia-config
+                  key: DL_URL
+            - name: QML_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ischemia-config
+                  key: QML_URL
+            - name: MODELS_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: ischemia-config
+                  key: MODELS_DIR
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: ischemia
+spec:
+  type: ClusterIP
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

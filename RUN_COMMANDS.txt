@@ -1,0 +1,187 @@
+ISCHEMIA PREDICTOR - WINDOWS COMMANDS
+=====================================
+
+All commands below assume the project is at:
+C:\Users\KISHI\Ischemia-predictor
+
+ONE-COMMAND START/UPDATE (POWERSHELL)
+-------------------------------------
+Set-Location C:\Users\KISHI\Ischemia-predictor; powershell -ExecutionPolicy Bypass -File .\scripts\run-all.ps1
+# Runs DVC if needed, rebuilds/starts Docker Compose and Kubernetes, waits for rollouts, opens both apps, and shows Kubernetes connections.
+# First-time setup only: initialize Compose with scripts\start.ps1 and configure the Kubernetes namespace/secrets below.
+# A second PowerShell window forwards Kubernetes; leave both windows open until finished, then press Enter in the first window.
+
+FIRST-TIME LOGIN
+----------------
+scripts\start.ps1 prompts you to set the Compose Administrator password and
+Clinician username/password. No default passwords are stored in this repository.
+For Kubernetes, use the account-creation commands below with your own local
+passwords. Never use test credentials on a publicly accessible deployment.
+
+
+1. LOCAL PYTHON AND DVC (COMMAND PROMPT)
+----------------------------------------
+
+cd /d C:\Users\KISHI\Ischemia-predictor
+REM Changes to the project folder so the commands can find the project files.
+
+call .venv\Scripts\activate.bat
+REM Activates the project's local Python environment in Command Prompt.
+
+python -m pip install -r requirements.txt
+REM Installs the project packages, including DVC, into the active environment.
+
+dvc --version
+REM Prints the installed DVC version.
+
+dvc dag
+REM Displays the pipeline graph; this project currently has one stage named train.
+
+dvc status
+REM Checks whether the tracked training inputs or generated outputs have changed.
+
+dvc repro
+REM Runs training if its inputs changed, or skips it when the pipeline is already current.
+
+dvc repro --force
+REM Reruns training even when DVC thinks the stage is current and overwrites model outputs.
+
+deactivate
+REM Leaves the local Python environment.
+
+
+2. START THE FULL DOCKER COMPOSE APP (POWERSHELL)
+-------------------------------------------------
+
+cd C:\Users\KISHI\Ischemia-predictor
+# Changes to the project folder.
+
+powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1
+# Builds and starts the Compose services, runs DVC training if needed, and prompts for any missing accounts.
+
+docker compose up --build -d
+# Builds current source files and starts or updates the Compose services in the background.
+
+docker compose ps
+# Shows whether the web app, database, model services, and MLflow are running.
+
+Start-Process "http://localhost:5000"
+# Opens the Docker Compose web app in a browser.
+
+Start-Process "http://localhost:5001"
+# Opens the MLflow tracking UI in a browser.
+
+docker compose logs -f
+# Follows live logs from all Compose services; press Ctrl+C to stop following.
+
+docker compose logs -f web
+# Follows only the web/API service logs.
+
+docker compose run --rm trainer dvc dag
+# Displays the DVC pipeline graph using the project's Docker image.
+
+docker compose run --rm trainer dvc status
+# Checks DVC pipeline status using the project's Docker image.
+
+docker compose run --rm trainer dvc repro
+# Runs or skips the DVC training stage using the Compose MLflow service.
+
+docker compose down
+# Stops and removes Compose containers while keeping the database volume.
+
+docker compose down -v
+# Stops Compose and deletes named data volumes, including the PostgreSQL database; this is destructive.
+
+
+3. CREATE A TEST ACCOUNT IF IT DOES NOT EXIST
+----------------------------------------------
+
+"REPLACE_WITH_LOCAL_ADMIN_PASSWORD" | docker compose exec -T web python -m scripts.create_user admin Administrator --password-stdin --if-not-exists
+# Replace the placeholder with a private, non-empty local password before running.
+
+"REPLACE_WITH_LOCAL_CLINICIAN_PASSWORD" | docker compose exec -T web python -m scripts.create_user doctor Clinician --password-stdin --if-not-exists
+# Replace the placeholder with a private, non-empty local password before running.
+
+"REPLACE_WITH_LOCAL_ADMIN_PASSWORD" | kubectl exec -i deployment/web -n ischemia -- python -m scripts.create_user admin Administrator --password-stdin --if-not-exists
+# Replace the placeholder with a private, non-empty local password before running.
+
+"REPLACE_WITH_LOCAL_CLINICIAN_PASSWORD" | kubectl exec -i deployment/web -n ischemia -- python -m scripts.create_user doctor Clinician --password-stdin --if-not-exists
+# Replace the placeholder with a private, non-empty local password before running.
+
+
+4. DOCKER DESKTOP KUBERNETES (POWERSHELL)
+-----------------------------------------
+
+kubectl get nodes
+# Checks that the Docker Desktop Kubernetes cluster is enabled and ready.
+
+kubectl create namespace ischemia
+# Creates the project namespace on a new cluster; skip if the namespace already exists.
+
+$postgresPassword = python -c "import secrets; print(secrets.token_hex(32))"
+# Generates a random PostgreSQL password for a new Kubernetes installation.
+
+$secretKey = python -c "import secrets; print(secrets.token_hex(32))"
+# Generates a random Flask session signing key for a new Kubernetes installation.
+
+$dataKey = python -c "import secrets; print(secrets.token_hex(32))"
+# Generates the 32-byte hexadecimal encryption key required by the app.
+
+kubectl create secret generic ischemia-secrets -n ischemia --from-literal=postgres-password=$postgresPassword --from-literal=secret-key=$secretKey --from-literal=data-key=$dataKey
+# Creates the Kubernetes secrets on a new cluster; skip if ischemia-secrets already exists.
+
+docker build -t ischemia-predictor:local .
+# Builds the current project code into an image available to Docker Desktop Kubernetes.
+
+kubectl apply -f .\k8s\deployment.yaml
+# Applies or updates the Kubernetes namespace, config, storage, deployments, and services.
+
+kubectl rollout restart deployment/web deployment/ml deployment/dl deployment/qml -n ischemia
+# Restarts the app pods so they load the image just built.
+
+kubectl rollout status deployment/web -n ischemia
+# Waits for the Kubernetes web deployment to become ready.
+
+kubectl rollout status deployment/ml -n ischemia
+# Waits for the Kubernetes ML prediction deployment to become ready.
+
+kubectl rollout status deployment/dl -n ischemia
+# Waits for the Kubernetes DL prediction deployment to become ready.
+
+kubectl rollout status deployment/qml -n ischemia
+# Waits for the Kubernetes QML prediction deployment to become ready.
+
+kubectl get pods,services,endpoints -n ischemia
+# Shows pod readiness and whether Kubernetes services are connected to pod endpoints.
+
+kubectl port-forward service/web 8081:80 -n ischemia
+# Forwards the Kubernetes web service to localhost port 8081; keep this terminal open.
+
+Start-Process "http://localhost:8081"
+# Opens the Kubernetes web app; port 8081 avoids Compose web port 5000 and MLflow port 5001.
+
+kubectl logs -f deployment/web -n ischemia
+# Follows live Kubernetes web/API logs; press Ctrl+C to stop following.
+
+kubectl logs -f deployment/ml -n ischemia
+# Follows live Kubernetes ML service logs.
+
+kubectl logs -f deployment/dl -n ischemia
+# Follows live Kubernetes DL service logs.
+
+kubectl logs -f deployment/qml -n ischemia
+# Follows live Kubernetes QML service logs.
+
+5. RUN THE TESTS (COMMAND PROMPT, PROJECT ENVIRONMENT ACTIVE)
+-------------------------------------------------------------
+
+python -m pytest -q
+REM Runs the automated API and frontend contract tests.
+
+
+PORTS
+-----
+Docker Compose web app:       http://localhost:5000
+Docker Compose MLflow:        http://localhost:5001
+Kubernetes web app:           http://localhost:8081 (while port-forward is running)
+Kubernetes internal services: ML/DL/QML on cluster port 5001; PostgreSQL on 5432

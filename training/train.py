@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import joblib
+import mlflow
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
@@ -63,10 +64,18 @@ def main():
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--qubits", type=int, default=4, help="number of features fed to the QML circuit")
     ap.add_argument("--qml-epochs", type=int, default=15)
+    ap.add_argument("--qml-samples", type=int, default=300)
+    ap.add_argument("--experiment", default=os.environ.get(
+        "MLFLOW_EXPERIMENT_NAME", "ischemia-predictor"))
     ap.add_argument("--force-validate", action="store_true",
                     help="mark models validated even if < 85%% (report the real numbers)")
     a = ap.parse_args()
     os.makedirs(a.models, exist_ok=True)
+
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_experiment(a.experiment)
+    dataset_sha256 = sha256(a.data)
 
     df = load_csv(a.data)
     print("records:", len(df), "positives:", int(df.label.sum()), "negatives:", int((df.label == 0).sum()))
@@ -93,8 +102,12 @@ def main():
     ml.fit(Ztr, ytr)
 
     top = np.argsort(ml.feature_importances_)[::-1][:a.qubits]
-    print("Training QML on", len(Ztr), "samples, qubits:", [FEATURES[i] for i in top])
-    qml_m = QMLClassifier(top, epochs=a.qml_epochs, seed=a.seed).fit(Ztr, ytr)
+    n = min(a.qml_samples, len(Ztr))
+    qml_rng = np.random.default_rng(a.seed)
+    qml_indices = qml_rng.choice(len(Ztr), n, replace=False)
+    print("Training QML on", n, "samples, qubits:", [FEATURES[i] for i in top])
+    qml_m = QMLClassifier(top, epochs=a.qml_epochs, seed=a.seed).fit(
+        Ztr[qml_indices], ytr[qml_indices])
 
     registry, report = [], {
         "trained_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
@@ -108,16 +121,66 @@ def main():
         ok = m["accuracy"] >= 0.85 and m["recall"] >= 0.85
         version = f"{mtype.lower()}-1.0"
         fn = f"{version}.joblib"
-        joblib.dump(model, os.path.join(a.models, fn))
+        model_path = os.path.join(a.models, fn)
+        joblib.dump(model, model_path)
         status = "validated" if (ok or a.force_validate) else "unvalidated"
         extra = f"  CV acc {cv[mtype]['accuracy']['mean']:.3f}±{cv[mtype]['accuracy']['std']:.3f}" if mtype in cv else ""
         print(f"{mtype}: accuracy={m['accuracy']:.3f} recall={m['recall']:.3f} "
               f"auc={m['roc_auc']:.3f}{extra} -> {status}")
-        registry.append({"type": mtype, "version": version, "file": fn,
-                         "sha256": sha256(os.path.join(a.models, fn)),
-                         "pipeline_version": PIPELINE_VERSION, "status": status,
-                         "is_active": status == "validated", "metrics": m})
+        entry = {"type": mtype, "version": version, "file": fn,
+                 "sha256": sha256(model_path),
+                 "pipeline_version": PIPELINE_VERSION, "status": status,
+                 "is_active": status == "validated", "metrics": m}
+        registry.append(entry)
         report["models"][mtype] = {"heldout": m, "cv": cv.get(mtype), "status": status}
+
+        if mtype == "ML":
+            model_params = {"n_estimators": 400, "min_samples_leaf": 2}
+        elif mtype == "DL":
+            model_params = {
+                "hidden_layer_sizes": str(grid.best_params_["hidden_layer_sizes"]),
+                "alpha": grid.best_params_["alpha"],
+                "max_iter": 2000,
+                "cross_validation_folds": 5,
+            }
+        else:
+            model_params = {
+                "qml_samples": n,
+                "qubits": model.n,
+                "layers": model.layers,
+                "epochs": model.epochs,
+                "learning_rate": model.lr,
+                "features": ",".join(FEATURES[i] for i in model.feature_idx),
+            }
+        with mlflow.start_run(run_name=f"{mtype.lower()}-{version}"):
+            mlflow.set_tags({
+                "model_type": mtype,
+                "model_version": version,
+                "pipeline_version": PIPELINE_VERSION,
+                "validation_status": status,
+            })
+            mlflow.log_params({
+                "dataset": os.path.basename(a.data),
+                "dataset_sha256": dataset_sha256,
+                "seed": a.seed,
+                "experiment": a.experiment,
+                "force_validate": a.force_validate,
+                "decision_threshold": 0.5,
+                **model_params,
+            })
+            mlflow.log_metrics({
+                key: value for key, value in m.items() if isinstance(value, (int, float))
+            })
+            mlflow.log_metric("validated", float(status == "validated"))
+            if mtype in cv:
+                mlflow.log_metrics({
+                    f"cv_{metric}_{stat}": value
+                    for metric, scores in cv[mtype].items()
+                    for stat, value in scores.items()
+                })
+            mlflow.log_artifact(model_path, artifact_path="model")
+            mlflow.log_artifact(pipeline_path(a.models), artifact_path="preprocessing")
+            mlflow.log_dict(entry, "registry_entry.json")
     with open(os.path.join(a.models, "registry.json"), "w") as f:
         json.dump(registry, f, indent=2)
     with open(os.path.join(a.models, "training_report.json"), "w") as f:

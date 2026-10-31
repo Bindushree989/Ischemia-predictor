@@ -41,7 +41,6 @@ Tags such as FR-xx / SEC-xx refer to requirement IDs in the SRS.
 import base64
 import json
 import os
-import re
 import time
 import uuid
 from collections import defaultdict, deque
@@ -258,11 +257,6 @@ def create_app(config=None):
         if g.get("new_token"):
             resp.headers["X-Token"] = g.new_token
         return resp
-
-    def check_password_policy(pw):
-        """Return truthy if ``pw`` has 10+ chars with lower, upper, digit and symbol."""
-        return (len(pw) >= 10 and re.search(r"[a-z]", pw) and re.search(r"[A-Z]", pw)
-                and re.search(r"\d", pw) and re.search(r"[^\w\s]", pw))
 
     def validate(data):
         """Validate and normalise the clinical input features.
@@ -539,15 +533,14 @@ def create_app(config=None):
         """Create a user (Administrator only).
 
         Body: ``{username, password, role}``; ``role`` must be in ``ROLES`` and
-        the password must satisfy ``check_password_policy``.
+        the password must be non-empty.
         201: ``{username, role}``. 400 VALIDATION_ERROR (invalid input or duplicate username).
         """
         d = request.get_json(silent=True) or {}
         u, pw, role = d.get("username"), d.get("password"), d.get("role")
-        if not isinstance(u, str) or not u or role not in ROLES or not isinstance(pw, str) \
-                or not check_password_policy(pw):
+        if not isinstance(u, str) or not u or role not in ROLES or not isinstance(pw, str) or not pw:
             return error("VALIDATION_ERROR", 400,
-                         "Valid username/role required; password needs 10+ chars with upper, lower, digit and symbol.")
+                         "Username, role, and a non-empty password are required.")
         if User.query.filter_by(username=u).first():
             return error("VALIDATION_ERROR", 400, "Username exists.")
         db.session.add(User(username=u, role=role,

@@ -7,3 +7,8 @@ __pycache__/
 .env.*
 !.env.example
 .DS_Store
+/mlflow.db
+/mlruns/
+/models/*.joblib
+/models/heldout.csv
+/models/registry.json

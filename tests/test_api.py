@@ -121,6 +121,16 @@ def test_login_returns_token_and_role(client):
     assert response.get_json()["token"]
 
 
+@pytest.mark.parametrize(
+    ("username", "role"),
+    [("adm", "Administrator"), ("engineer", "ML Engineer")],
+)
+def test_login_returns_each_account_role(client, username, role):
+    response = login(client, username)
+    assert response.status_code == 200
+    assert response.get_json()["role"] == role
+
+
 def test_invalid_login_is_rejected(client):
     response = login(client, password="incorrect")
     assert response.status_code == 401
@@ -267,14 +277,26 @@ def test_non_admin_cannot_create_users(client):
     assert response.status_code == 403
 
 
-def test_admin_password_policy_is_enforced(client):
+def test_admin_can_create_user_with_short_password(client):
     response = client.post(
         "/api/v1/admin/users",
         json={
             "username": "weak-user",
-            "password": "short",
+            "password": "x",
             "role": "Clinician",
         },
+        headers=auth_headers(client, "adm"),
+    )
+    assert response.status_code == 201
+    login_response = login(client, "weak-user", "x")
+    assert login_response.status_code == 200
+    assert login_response.get_json()["role"] == "Clinician"
+
+
+def test_admin_cannot_create_user_with_empty_password(client):
+    response = client.post(
+        "/api/v1/admin/users",
+        json={"username": "empty-password", "password": "", "role": "Clinician"},
         headers=auth_headers(client, "adm"),
     )
     assert response.status_code == 400
