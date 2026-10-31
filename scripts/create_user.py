@@ -1,6 +1,5 @@
 """Create a user:  python -m scripts.create_user <username> <role> <password>"""
 import sys
-import re
 import bcrypt
 from web.app import app, db, User, ROLES
 
@@ -20,9 +19,8 @@ if __name__ == "__main__":
         )
     u, role = args[:2]
     pw = sys.stdin.readline().rstrip("\r\n") if password_from_stdin else positional[0]
-    if (len(pw) < 10 or not re.search(r"[a-z]", pw) or not re.search(r"[A-Z]", pw)
-            or not re.search(r"\d", pw) or not re.search(r"[^\w\s]", pw)):
-        raise SystemExit("password needs 10+ characters with upper, lower, digit and symbol")
+    if not pw:
+        raise SystemExit("password must not be empty")
     with app.app_context():
         if User.query.filter_by(username=u).first():
             if if_not_exists:

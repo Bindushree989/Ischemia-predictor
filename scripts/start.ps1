@@ -16,13 +16,18 @@ function New-RandomHex {
     return [BitConverter]::ToString($bytes).Replace("-", "").ToLowerInvariant()
 }
 
-function Invoke-CreateClinician($docker) {
-    $username = Read-Host "Initial clinician username (existing accounts are left unchanged)"
+function Invoke-CreateUser($docker, $role, $defaultUsername) {
+    if ($defaultUsername) {
+        $username = $defaultUsername
+    }
+    else {
+        $username = Read-Host "Initial $role username (existing accounts are left unchanged)"
+    }
     if ($username -notmatch "^[A-Za-z0-9._-]{1,64}$") {
         throw "Username must be 1-64 characters and contain only letters, numbers, '.', '_' or '-'."
     }
 
-    $securePassword = Read-Host "Clinician password (10+ characters with upper, lower, digit and symbol)" -AsSecureString
+    $securePassword = Read-Host "$role password (any non-empty password)" -AsSecureString
     $passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
     try {
         $password = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)
@@ -30,10 +35,13 @@ function Invoke-CreateClinician($docker) {
     finally {
         [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer)
     }
+    if ([string]::IsNullOrEmpty($password)) {
+        throw "Password cannot be empty."
+    }
 
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $docker
-    $startInfo.Arguments = "compose exec -T web python -m scripts.create_user $username Clinician --password-stdin --if-not-exists"
+    $startInfo.Arguments = "compose exec -T web python -m scripts.create_user $username $role --password-stdin --if-not-exists"
     $startInfo.WorkingDirectory = $repoRoot
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
@@ -60,7 +68,7 @@ function Invoke-CreateClinician($docker) {
         Write-Host $stderr.Trim()
     }
     if ($process.ExitCode -ne 0) {
-        throw "Could not create the clinician account. Check the password policy and application logs."
+        throw "Could not create the $role account. Check the application logs."
     }
 }
 
@@ -178,7 +186,8 @@ try {
         throw "Application did not become ready at http://localhost:5000."
     }
 
-    Invoke-CreateClinician $docker
+    Invoke-CreateUser $docker "Administrator" "admin"
+    Invoke-CreateUser $docker "Clinician" ""
     & $docker compose ps
     Write-Host "Application is ready: http://localhost:5000"
     Write-Host "MLflow tracking UI: http://localhost:5001"

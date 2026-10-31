@@ -3,7 +3,6 @@ registry, audit log (SAD sections 2-3)."""
 import base64
 import json
 import os
-import re
 import time
 import uuid
 from collections import defaultdict, deque
@@ -153,10 +152,6 @@ def create_app(config=None):
         if g.get("new_token"):
             resp.headers["X-Token"] = g.new_token
         return resp
-
-    def check_password_policy(pw):
-        return (len(pw) >= 10 and re.search(r"[a-z]", pw) and re.search(r"[A-Z]", pw)
-                and re.search(r"\d", pw) and re.search(r"[^\w\s]", pw))
 
     def validate(data):
         out, errs = {}, {}
@@ -356,10 +351,9 @@ def create_app(config=None):
     def create_user():
         d = request.get_json(silent=True) or {}
         u, pw, role = d.get("username"), d.get("password"), d.get("role")
-        if not isinstance(u, str) or not u or role not in ROLES or not isinstance(pw, str) \
-                or not check_password_policy(pw):
+        if not isinstance(u, str) or not u or role not in ROLES or not isinstance(pw, str) or not pw:
             return error("VALIDATION_ERROR", 400,
-                         "Valid username/role required; password needs 10+ chars with upper, lower, digit and symbol.")
+                         "Username, role, and a non-empty password are required.")
         if User.query.filter_by(username=u).first():
             return error("VALIDATION_ERROR", 400, "Username exists.")
         db.session.add(User(username=u, role=role,

@@ -10,9 +10,11 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 dvc repro
-python -m scripts.create_user admin Administrator 'Adm1n!Passw0rd'
-python -m scripts.create_user doc1 Clinician 'Cl1nician!Pass'
+python -m scripts.create_user admin Administrator YOUR_STRONG_ADMIN_PASSWORD
+python -m scripts.create_user doc1 Clinician YOUR_STRONG_CLINICIAN_PASSWORD
 ```
+Replace the password placeholders with a non-empty password; the built-in role is
+selected from the account, not from a separate login option.
 If activation is blocked: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned`.
 Training takes about 1-2 minutes and prints accuracy/recall per model. A model needs
 >= 85% accuracy AND recall (NFR-06) to be `validated`; only validated models can predict.
@@ -43,10 +45,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1
 
 The script checks Docker and the DVC configuration, creates `.env` with fresh secrets
 if needed, starts MLflow, runs `dvc repro`, builds and starts PostgreSQL and the
-web/ML/DL/QML services, waits for the UI to respond, and prompts for a Clinician account.
-Account passwords are sent to the container through standard input; an existing account
-is left unchanged. The password must have at least 10 characters, including uppercase,
-lowercase, a digit, and a symbol. Open the app at http://localhost:5000 and MLflow at
+web/ML/DL/QML services, waits for the UI to respond, and prompts for an Administrator
+password for the `admin` username, then prompts for a Clinician username and password.
+Passwords are sent to the container through standard input; existing accounts are left
+unchanged. Any non-empty password is accepted. Open the app at http://localhost:5000 and MLflow at
 http://localhost:5001.
 
 To stop the app, run `docker compose down`. PostgreSQL data is kept in the
@@ -122,10 +124,45 @@ kubectl create secret generic ischemia-secrets -n ischemia `
   --from-literal=data-key=$dataKey
 kubectl apply -f k8s/deployment.yaml
 kubectl rollout status deployment/web -n ischemia
-kubectl port-forward service/web 5000:80 -n ischemia
+kubectl port-forward service/web 8081:80 -n ischemia
 ```
 
-Open http://localhost:5000. For a remote cluster, build and push the image to a registry
+Open http://localhost:8081. Port 8081 avoids conflicts with the Compose app on port 5000
+and MLflow on port 5001.
+
+### Update and verify a running Kubernetes deployment
+
+After changing the UI, API, or model-service code, rebuild the image in Docker Desktop's
+image store and restart the app deployments so their pods use it:
+
+```powershell
+docker build -t ischemia-predictor:local .
+kubectl rollout restart deployment/web deployment/ml deployment/dl deployment/qml -n ischemia
+kubectl rollout status deployment/web -n ischemia
+kubectl rollout status deployment/ml -n ischemia
+kubectl rollout status deployment/dl -n ischemia
+kubectl rollout status deployment/qml -n ischemia
+```
+
+In another PowerShell window, keep the port-forward running and verify the UI and API
+through the Kubernetes Service:
+
+```powershell
+kubectl port-forward service/web 8081:80 -n ischemia
+```
+
+```powershell
+Invoke-WebRequest http://localhost:8081/ -UseBasicParsing
+kubectl get pods,services,endpoints -n ischemia
+kubectl logs -f deployment/web -n ischemia
+```
+
+Ready pods and populated Service endpoints confirm that Kubernetes has connected each
+Service to a pod. The web pod can also reach the prediction services using their internal
+DNS names (`ml`, `dl`, and `qml`). In Docker Desktop, select the `ischemia` namespace
+under Kubernetes workloads, then select a pod to inspect its logs and events.
+
+For a remote cluster, build and push the image to a registry
 accessible to the cluster, then replace `ischemia-predictor:local` in the manifest with
 the registry image reference. Configure ingress/TLS separately for public access.
 Kubernetes secret resources are only base64-encoded by default; enable cluster secret
