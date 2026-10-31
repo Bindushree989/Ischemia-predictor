@@ -18,3 +18,4 @@ stages:
       - models/pipeline-1.0.joblib
       - models/qml-1.0.joblib
       - models/registry.json
+      - models/training_report.json

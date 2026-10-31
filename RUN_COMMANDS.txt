@@ -11,10 +11,12 @@ Set-Location C:\Users\KISHI\Ischemia-predictor; powershell -ExecutionPolicy Bypa
 # First-time setup only: initialize Compose with scripts\start.ps1 and configure the Kubernetes namespace/secrets below.
 # A second PowerShell window forwards Kubernetes; leave both windows open until finished, then press Enter in the first window.
 
-TEST LOGIN (already created in both Docker Compose and Kubernetes databases):
-Administrator: username admin, password admin
-Clinician:     username doctor, password doctor
-These are weak test-only credentials. Do not expose the app publicly with them.
+FIRST-TIME LOGIN
+----------------
+scripts\start.ps1 prompts you to set the Compose Administrator password and
+Clinician username/password. No default passwords are stored in this repository.
+For Kubernetes, use the account-creation commands below with your own local
+passwords. Never use test credentials on a publicly accessible deployment.
 
 
 1. LOCAL PYTHON AND DVC (COMMAND PROMPT)
@@ -94,17 +96,17 @@ docker compose down -v
 3. CREATE A TEST ACCOUNT IF IT DOES NOT EXIST
 ----------------------------------------------
 
-"admin" | docker compose exec -T web python -m scripts.create_user admin Administrator --password-stdin
-# Creates admin/admin in the Compose database; do not run if that username already exists.
+"REPLACE_WITH_LOCAL_ADMIN_PASSWORD" | docker compose exec -T web python -m scripts.create_user admin Administrator --password-stdin --if-not-exists
+# Replace the placeholder with a private, non-empty local password before running.
 
-"doctor" | docker compose exec -T web python -m scripts.create_user doctor Clinician --password-stdin
-# Creates doctor/doctor in the Compose database; do not run if that username already exists.
+"REPLACE_WITH_LOCAL_CLINICIAN_PASSWORD" | docker compose exec -T web python -m scripts.create_user doctor Clinician --password-stdin --if-not-exists
+# Replace the placeholder with a private, non-empty local password before running.
 
-"admin" | kubectl exec -i deployment/web -n ischemia -- python -m scripts.create_user admin Administrator --password-stdin
-# Creates admin/admin in the Kubernetes database; do not run if that username already exists.
+"REPLACE_WITH_LOCAL_ADMIN_PASSWORD" | kubectl exec -i deployment/web -n ischemia -- python -m scripts.create_user admin Administrator --password-stdin --if-not-exists
+# Replace the placeholder with a private, non-empty local password before running.
 
-"doctor" | kubectl exec -i deployment/web -n ischemia -- python -m scripts.create_user doctor Clinician --password-stdin
-# Creates doctor/doctor in the Kubernetes database; do not run if that username already exists.
+"REPLACE_WITH_LOCAL_CLINICIAN_PASSWORD" | kubectl exec -i deployment/web -n ischemia -- python -m scripts.create_user doctor Clinician --password-stdin --if-not-exists
+# Replace the placeholder with a private, non-empty local password before running.
 
 
 4. DOCKER DESKTOP KUBERNETES (POWERSHELL)

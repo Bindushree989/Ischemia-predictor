@@ -1,38 +1,33 @@
 schema: '2.0'
 stages:
   train:
-    cmd: "python -m training.train --data data/heart.csv --models models --qml-samples 300 --experiment ischemia-predictor"
+    cmd: python -m training.train --data data/heart.csv --models models
+      --qml-samples 300 --experiment ischemia-predictor
     deps:
     - path: common/features.py
       hash: md5
       md5: 7b5c751331264b7a6e72cde415a78102
       size: 2066
-      isexec: true
     - path: common/preprocess.py
       hash: md5
-      md5: bba77ca9649b7e3d4dbd23a730b4fc32
-      size: 787
-      isexec: true
+      md5: e46c3bd7e5d8b3b050b19aeb12a8e421
+      size: 3158
     - path: common/qml_model.py
       hash: md5
-      md5: eb9ea04b0fb936e26af949c06524ac15
-      size: 2031
-      isexec: true
+      md5: b91967bbd8da53a6b9d14e149ec9262a
+      size: 3516
     - path: data/heart.csv
       hash: md5
       md5: f7265baea21f70575307f56c82ee5e66
       size: 36840
-      isexec: true
     - path: requirements.txt
       hash: md5
       md5: c3baca5ee02432602e4870a3cd77762d
       size: 184
-      isexec: true
     - path: training/train.py
       hash: md5
-      md5: 42e01f38358582e02868c7eb6ab7fa37
-      size: 6409
-      isexec: true
+      md5: bcc1a514743b296aaa3403017d99a176
+      size: 8937
     params:
       params.yaml:
         train.mlflow_experiment: ischemia-predictor
@@ -40,25 +35,29 @@ stages:
     outs:
     - path: models/dl-1.0.joblib
       hash: md5
-      md5: 9848a72d533f9433368c916f667efc79
+      md5: 82b8dadf6fa0023a091b1eb6f52babea
       size: 21160
     - path: models/heldout.csv
       hash: md5
-      md5: a643ef3268d5ddf34ed361d395a9f5d5
-      size: 10005
+      md5: 987e51ecc132fea96787f1381d226beb
+      size: 10190
     - path: models/ml-1.0.joblib
       hash: md5
-      md5: 30d2a11093b37fdbb7f601f0f0b22a7e
-      size: 5234601
+      md5: d8f7eb1bde207f506eae4440491bcd0b
+      size: 5234569
     - path: models/pipeline-1.0.joblib
       hash: md5
-      md5: 429d9409d65473012a881f2a463494ed
+      md5: ccb34de326550da1037b51a58a8dd9fa
       size: 1321
     - path: models/qml-1.0.joblib
       hash: md5
-      md5: 079e70c52add99bb6052b00b225ccd44
-      size: 808
+      md5: 711209adf53a422b767547ecf970f02f
+      size: 1656
     - path: models/registry.json
       hash: md5
-      md5: f5ba2270a896d7b14570204477aede07
-      size: 1196
+      md5: 8735a4f2eedfc16be42cc83e1b1a8b9f
+      size: 1565
+    - path: models/training_report.json
+      hash: md5
+      md5: 832e9df4881b8eb8f38a8319fef90804
+      size: 2111
