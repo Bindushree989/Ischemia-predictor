@@ -1,0 +1,12 @@
+{
+  "name": "ischemia-predictor-browser-tests",
+  "private": true,
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium",
+    "test:e2e:report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0"
+  }
+}

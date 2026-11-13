@@ -7,6 +7,7 @@ Prediction-service calls are mocked so tests do not require running ML/DL/QML
 microservices. The tests still exercise Flask routing, authentication, RBAC,
 validation, persistence, and response contracts.
 """
+import hashlib
 import json
 
 import bcrypt
@@ -32,15 +33,44 @@ def app_client(tmp_path, monkeypatch):
     samples = rng.normal(size=(60, len(FEATURES)))
     joblib.dump(build_pipeline().fit(samples), pipeline_path(str(tmp_path)))
 
-    registry = [{
-        "type": "ML",
-        "version": "ml-test-1",
-        "file": "test-model.joblib",
-        "sha256": "test-checksum",
-        "pipeline_version": PIPELINE_VERSION,
-        "status": "validated",
-        "is_active": True,
-    }]
+    registry = [
+        {
+            "type": "ML",
+            "version": "ml-test-1",
+            "file": "test-model.joblib",
+            "sha256": "test-checksum",
+            "pipeline_version": PIPELINE_VERSION,
+            "status": "validated",
+            "is_active": True,
+            "framework": "scikit-learn",
+            "algorithm": "Random Forest",
+            "metrics": {"accuracy": 0.9, "recall": 0.91, "roc_auc": 0.92},
+        },
+        {
+            "type": "ML",
+            "version": "ml-test-2",
+            "file": "test-model-2.joblib",
+            "sha256": "test-checksum-2",
+            "pipeline_version": PIPELINE_VERSION,
+            "status": "validated",
+            "is_active": False,
+            "framework": "XGBoost",
+            "algorithm": "XGBoost Classifier",
+            "metrics": {"accuracy": 0.92, "recall": 0.93, "roc_auc": 0.94},
+        },
+        {
+            "type": "QML",
+            "version": "qml-test-1",
+            "file": "qml-test-1.joblib",
+            "sha256": "qml-test-checksum",
+            "pipeline_version": PIPELINE_VERSION,
+            "status": "validated",
+            "is_active": True,
+            "framework": "PennyLane",
+            "algorithm": "Variational Classifier",
+            "metrics": {"accuracy": 0.77, "recall": 0.76, "roc_auc": 0.86},
+        },
+    ]
     (tmp_path / "registry.json").write_text(json.dumps(registry), encoding="utf-8")
 
     from web import app as webapp
@@ -175,6 +205,18 @@ def test_prediction_rejects_unknown_model(client):
     assert response.status_code == 400
 
 
+def test_prediction_requires_an_active_exact_model_version(client):
+    unavailable = make_prediction(
+        client, payload={**GOOD, "model": "ML", "model_version": "ml-test-2"}
+    )
+    mismatched_family = make_prediction(
+        client, payload={**GOOD, "model": "DL", "model_version": "ml-test-1"}
+    )
+    assert unavailable.status_code == 400
+    assert unavailable.get_json()["error_code"] == "MODEL_NOT_AVAILABLE"
+    assert mismatched_family.status_code == 400
+
+
 def test_prediction_returns_frontend_contract(client):
     response = make_prediction(client)
     body = response.get_json()
@@ -260,6 +302,9 @@ def test_engineer_can_list_models_but_cannot_activate(client):
     assert client.put(
         f"/api/v1/models/{model_id}/activate", headers=headers
     ).status_code == 403
+    assert client.put(
+        f"/api/v1/models/{model_id}/deactivate", headers=headers
+    ).status_code == 403
 
 
 # Administration and model registry
@@ -323,6 +368,129 @@ def test_model_list_has_fields_used_by_frontend(client):
     assert response.status_code == 200
     model = response.get_json()[0]
     assert {"id", "type", "version", "status", "is_active"} <= set(model)
+    assert model["framework"] == "scikit-learn"
+    assert model["algorithm"] == "Random Forest"
+    assert model["metrics"]["accuracy"] == 0.9
+
+
+def test_prediction_model_options_only_include_active_validated_models(client):
+    response = client.get(
+        "/api/v1/prediction-models", headers=auth_headers(client)
+    )
+    assert response.status_code == 200
+    assert response.get_json() == [{"type": "ML", "version": "ml-test-1"}]
+
+
+def test_prediction_model_options_require_a_prediction_role(client):
+    assert client.get("/api/v1/prediction-models").status_code == 401
+    response = client.get(
+        "/api/v1/prediction-models", headers=auth_headers(client, "adm")
+    )
+    assert response.status_code == 403
+    assert client.get(
+        "/api/v1/prediction-models", headers=auth_headers(client, "engineer")
+    ).status_code == 200
+
+
+def test_activating_alternative_model_changes_prediction_version(client):
+    models = client.get(
+        "/api/v1/models", headers=auth_headers(client, "adm")
+    ).get_json()
+    alternative = next(model for model in models if model["version"] == "ml-test-2")
+
+    activation = client.put(
+        f"/api/v1/models/{alternative['id']}/activate",
+        headers=auth_headers(client, "adm"),
+    )
+    assert activation.status_code == 200
+
+    options = client.get(
+        "/api/v1/prediction-models", headers=auth_headers(client)
+    ).get_json()
+    assert options == [
+        {"type": "ML", "version": "ml-test-1"},
+        {"type": "ML", "version": "ml-test-2"},
+    ]
+
+    legacy_response = make_prediction(client)
+    assert legacy_response.status_code == 201
+    assert legacy_response.get_json()["model_version"] == "ml-test-1"
+
+    response = make_prediction(
+        client, payload={**GOOD, "model": "ML", "model_version": "ml-test-2"}
+    )
+    assert response.status_code == 201
+    assert response.get_json()["model_version"] == "ml-test-2"
+
+
+def test_admin_can_deactivate_one_version_without_affecting_siblings(client):
+    models = client.get(
+        "/api/v1/models", headers=auth_headers(client, "adm")
+    ).get_json()
+    original = next(model for model in models if model["version"] == "ml-test-1")
+    alternative = next(model for model in models if model["version"] == "ml-test-2")
+    admin_headers = auth_headers(client, "adm")
+
+    assert client.put(
+        f"/api/v1/models/{alternative['id']}/activate", headers=admin_headers
+    ).status_code == 200
+    response = client.put(
+        f"/api/v1/models/{alternative['id']}/deactivate", headers=admin_headers
+    )
+    assert response.status_code == 200
+    assert response.get_json()["is_active"] is False
+
+    options = client.get(
+        "/api/v1/prediction-models", headers=auth_headers(client)
+    ).get_json()
+    assert options == [{"type": "ML", "version": original["version"]}]
+
+
+def test_model_below_metric_gate_cannot_be_activated(client):
+    models = client.get(
+        "/api/v1/models", headers=auth_headers(client, "adm")
+    ).get_json()
+    qml = next(model for model in models if model["version"] == "qml-test-1")
+    assert qml["status"] == "unvalidated"
+    assert qml["can_activate"] is False
+    response = client.put(
+        f"/api/v1/models/{qml['id']}/activate",
+        headers=auth_headers(client, "adm"),
+    )
+    assert response.status_code == 409
+    assert response.get_json()["error_code"] == "MODEL_NOT_ACTIVATABLE"
+
+
+def test_checksum_registration_does_not_bypass_metric_validation(app_client, tmp_path):
+    _, client, _ = app_client
+    artifact = tmp_path / "registered-model.joblib"
+    artifact.write_bytes(b"test artifact")
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    registration = client.post(
+        "/api/v1/models",
+        json={
+            "type": "ML",
+            "version": "ml-registered-test",
+            "file": artifact.name,
+            "sha256": digest,
+            "pipeline_version": PIPELINE_VERSION,
+        },
+        headers=auth_headers(client, "engineer"),
+    )
+    assert registration.status_code == 201
+    assert registration.get_json()["status"] == "unvalidated"
+
+    model = next(
+        item for item in client.get(
+            "/api/v1/models", headers=auth_headers(client, "adm")
+        ).get_json()
+        if item["version"] == "ml-registered-test"
+    )
+    activation = client.put(
+        f"/api/v1/models/{model['id']}/activate",
+        headers=auth_headers(client, "adm"),
+    )
+    assert activation.status_code == 409
 
 
 def test_admin_can_read_audit_logs(client):
@@ -348,6 +516,8 @@ def test_frontend_contains_all_primary_views(client):
     html = response.get_data(as_text=True)
     for marker in (
         "loginView", "predictPage", "historyPage",
-        "adminPage", "modelsPage", "resultCard",
+        "adminPage", "modelsPage", "resultCard", "Open MLflow",
+        "Six candidate architectures", "ROC-AUC", "/prediction-models",
+        "model_version", "Deactivate",
     ):
         assert marker in html

@@ -4,6 +4,9 @@ A clinical decision-support application that combines a Flask API gateway with M
 and QML prediction services. The gateway handles authentication, role-based access control,
 input validation, preprocessing, prediction orchestration, history, model registry, and audit logs.
 
+For the complete model guide, test-plan explanation, local commands, and folder map, see
+[PROJECT_GUIDE.md](PROJECT_GUIDE.md).
+
 > **Clinical safety:** This application is a prototype decision-support tool. Its output is
 > not a medical diagnosis and must not be used as the sole basis for clinical decisions.
 > A qualified healthcare professional must interpret results in the appropriate clinical context.
@@ -28,7 +31,7 @@ validated ischemia diagnostic model.
 | Role | Supported UI/API capabilities |
 |---|---|
 | Clinician | Create predictions and view own prediction history |
-| Administrator | View own history, create users, inspect audit logs, activate validated models, delete predictions (API) |
+| Administrator | View own history, create users, inspect audit logs, independently activate/deactivate validated model versions, delete predictions (API) |
 | ML Engineer | Create predictions (test use) and inspect or register models (API) |
 
 The backend enforces permissions. Hiding a navigation item in the browser is only a usability
@@ -51,11 +54,10 @@ python -m venv .venv
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 dvc repro
-python -m scripts.create_user admin Administrator YOUR_STRONG_ADMIN_PASSWORD
-python -m scripts.create_user doc1 Clinician YOUR_STRONG_CLINICIAN_PASSWORD
 ```
-Replace the password placeholders with a non-empty password; the built-in role is
-selected from the account, not from a separate login option.
+
+Use the secure account-creation steps in [PROJECT_GUIDE.md](PROJECT_GUIDE.md) for a Python-only
+run, or use `scripts/start.ps1` to start the Compose stack and securely create accounts.
 
 If PowerShell blocks environment activation:
 
@@ -86,6 +88,7 @@ that a model has passed a metric threshold when it has not; if you use it, repor
 | `--seed` | `42` | Random seed for the split and models |
 | `--qubits` | `4` | Number of features fed to the QML circuit |
 | `--qml-epochs` | `15` | QML training epochs |
+| `--qml-samples` | `300` | Maximum training samples used for each QML candidate |
 | `--force-validate` | off | Mark models validated even if below 85% (report real numbers) |
 
 ### Training outputs
@@ -93,20 +96,50 @@ that a model has passed a metric threshold when it has not; if you use it, repor
 Files written to `models/`:
 
 - `registry.json` — model versions, SHA-256 checksums, status and held-out metrics.
-- `training_report.json` — dataset hash, training date, seed, DL settings, QML features and
-  loss curve, held-out metrics (accuracy, recall, precision, F1, ROC-AUC, confusion matrix)
-  and 5-fold cross-validation scores.
+- `training_report.json` — dataset hash, training date, seed, candidate metadata, held-out
+  metrics (accuracy, recall, precision, F1, ROC-AUC, confusion matrix), 5-fold CV for the
+  classical models, and QML loss histories.
 - `pipeline-1.0.joblib` — the shared preprocessing pipeline used for training and inference.
-- `ml-1.0.joblib`, `dl-1.0.joblib`, `qml-1.0.joblib` — the trained models.
+- `ml-1.0.joblib`, `ml-2.0.joblib`, `dl-1.0.joblib`, `dl-2.0.joblib`,
+  `qml-1.0.joblib`, `qml-2.0.joblib` — two candidates in each model family.
 - `heldout.csv` — the test split (used for TC-22).
+
+### Model candidates
+
+| Family | Version | Framework | Candidate |
+|---|---|---|---|
+| ML | `ml-1.0` | scikit-learn | Random Forest |
+| ML | `ml-2.0` | XGBoost | XGBoost Classifier |
+| DL | `dl-1.0` | scikit-learn | Tuned MLP |
+| DL | `dl-2.0` | scikit-learn | Three-hidden-layer MLP (64-32-16) |
+| QML | `qml-1.0` | PennyLane | Variational classifier, 3 layers |
+| QML | `qml-2.0` | PennyLane | Variational classifier, 5 layers |
+
+Each candidate is evaluated separately on the same stratified held-out split. The existing
+promotion gate remains unchanged: accuracy **and** recall must each be at least 85%; otherwise
+the candidate remains unvalidated and cannot be activated. The original `*-1.0` candidate remains
+the default active version when it passes, preserving the existing behavior. Other passing
+versions are available for an Administrator to activate from the registry without deactivating
+other versions in that family. The Clinician picker lists every active, validated version and
+submits the exact selected version. An Administrator can deactivate versions independently.
+The current QML candidates are trained and produce probabilities offline, but `qml-1.0` scored
+77.72% accuracy / 76.47% recall and `qml-2.0` scored 76.63% / 80.39% on the held-out split. Both
+are below the 85% promotion gate, so the model service rejects them as unvalidated and the
+Clinician picker omits them. This is an application validation rule, not a Windows permissions
+issue; Administrator privileges do not bypass it. Do not manually mark them validated or use
+`--force-validate` to enable patient-facing predictions. See the [QML explanation in
+PROJECT_GUIDE.md](PROJECT_GUIDE.md#why-the-qml-candidates-are-blocked).
 
 ### Results (heart.csv, 80/20 stratified split, seed 42)
 
 | Model | Held-out accuracy | Held-out recall | 5-fold CV accuracy | ROC-AUC | Status |
-|---|---|---|---|---|---|
-| ML (random forest) | 90.2% | 93.1% | 86.2% ± 3.5% | 0.927 | validated |
-| DL (MLP, scikit-learn) | 87.0% | 91.2% | 85.7% ± 3.3% | 0.917 | validated |
-| QML (4-qubit simulator) | 78.8% | 83.3% | not run | 0.863 | unvalidated (below 85%) |
+|---|---:|---:|---:|---:|---|
+| ML Random Forest (`ml-1.0`) | 90.2% | 93.1% | 86.2% ± 3.6% | 0.9271 | validated, active |
+| ML XGBoost (`ml-2.0`) | 85.9% | 85.3% | 86.9% ± 2.8% | 0.9252 | validated |
+| DL tuned MLP (`dl-1.0`) | 87.0% | 91.2% | 85.7% ± 3.3% | 0.9170 | validated, active |
+| DL deep MLP (`dl-2.0`) | 87.5% | 90.2% | 82.0% ± 4.7% | 0.9152 | validated |
+| QML 3-layer (`qml-1.0`) | 77.7% | 76.5% | not run | 0.8690 | unvalidated |
+| QML 5-layer (`qml-2.0`) | 76.6% | 80.4% | not run | 0.8696 | unvalidated |
 
 Cross-validation is the more conservative estimate; a single held-out split can be optimistic.
 Numbers can shift slightly with a different seed or library version. Re-run training and copy
@@ -114,69 +147,86 @@ the values from `models/training_report.json` to update this table.
 
 ### After retraining
 
-Model versions keep the same names (`ml-1.0`, `dl-1.0`, `qml-1.0`), and the gateway imports
-versions from `registry.json` only the first time it sees them. After retraining, either:
+The gateway imports new versions from `registry.json` when it starts but does not overwrite
+existing database registry records. When retraining with changed data or code, assign new model
+version identifiers before deploying. After retraining, either:
 
 1. delete `instance/ischemia.db` and recreate the users, or
-2. change the version names in `training/train.py` before training.
+2. update the version names in `training/train.py` before training.
 
 Then restart all prediction services and the gateway.
 
 ## Create user accounts
 
-```powershell
-python -m scripts.create_user admin Administrator "Adm1n!Passw0rd"
-python -m scripts.create_user doc1 Clinician "Cl1nician!Passw0rd"
-python -m scripts.create_user engineer1 "ML Engineer" "Eng1neer!Passw0rd"
-```
-
-Any non-empty password is accepted by the user-creation API and helper script. Use unique,
-strong passwords outside local testing. Do not commit credentials, `.env` files, database files,
-model artifacts containing sensitive data, or production secrets to Git.
+For a Python-only setup, see the masked-password bootstrap example in
+[PROJECT_GUIDE.md](PROJECT_GUIDE.md). The Compose startup script prompts securely for initial
+accounts. Any non-empty password is accepted by the helper script; use unique, strong passwords
+outside local testing. Do not commit credentials, `.env` files, database files, model artifacts
+containing sensitive data, or production secrets to Git.
 
 ## Run the application
 
-Start each service in a separate terminal from the project root, with the virtual environment
-activated in each terminal.
-
-Terminal 1 — ML:
+For a complete local stack, Docker Compose is the recommended option (see
+[Start the whole application](#start-the-whole-application-windows-powershell)).
+For a Python-only development run, first install dependencies and generate model artifacts:
 
 ```powershell
-$env:MODEL_TYPE="ML"
-$env:PORT="5001"
+python -m pip install -r requirements.txt
+dvc repro
+```
+
+Run each process in a separate PowerShell terminal from the project root. MLflow owns port 5001,
+so the local model services use ports 5101–5103. Activate `.venv\Scripts\Activate.ps1` in each
+terminal before running its command.
+
+Terminal 1 — MLflow:
+
+```powershell
+mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5001
+```
+
+Terminal 2 — ML:
+
+```powershell
+$env:MODEL_TYPE="ML"; $env:PORT="5101"
 python -m services.model_service
 ```
 
-Terminal 2 — DL:
+Terminal 3 — DL:
 
 ```powershell
-$env:MODEL_TYPE="DL"
-$env:PORT="5002"
+$env:MODEL_TYPE="DL"; $env:PORT="5102"
 python -m services.model_service
 ```
 
-Terminal 3 — QML:
+Terminal 4 — QML:
 
 ```powershell
-$env:MODEL_TYPE="QML"
-$env:PORT="5003"
+$env:MODEL_TYPE="QML"; $env:PORT="5103"
 python -m services.model_service
 ```
 
-Terminal 4 — Flask gateway:
+Terminal 5 — Flask gateway:
 
 ```powershell
+$dbPath = Join-Path $env:TEMP "ischemia-predictor-demo.db"
+$env:DATABASE_URL = "sqlite:///$($dbPath -replace '\\','/')"
+$env:ML_URL = "http://127.0.0.1:5101"
+$env:DL_URL = "http://127.0.0.1:5102"
+$env:QML_URL = "http://127.0.0.1:5103"
 flask --app web.app run --host 127.0.0.1 --port 5000
 ```
 
-Open [http://127.0.0.1:5000](http://127.0.0.1:5000) in a browser and sign in using an account
-created above. Select a prediction model, complete all 11 clinical inputs, and submit the form.
+Copy the `DATABASE_URL`, `ML_URL`, `DL_URL`, and `QML_URL` assignments into the gateway and
+account-creation terminals. The Python-only example uses the app's development-only default
+signing/encryption keys; do not use those defaults outside localhost development. Open
+[http://127.0.0.1:5000](http://127.0.0.1:5000) and sign in. The prediction picker lists only
+active, validated models; it will not offer a QML model until one meets the validation criteria
+and is activated.
 
-If a selected model is not registered, validated, active, or reachable, the API returns a
-service-unavailable response. Start the relevant service and verify the model registry and
-pipeline version before retrying. With the current training results the QML model is
-`unvalidated`, so selecting it returns a service-unavailable response unless it was trained
-with `--force-validate`.
+Stop a local service by pressing Ctrl+C in its terminal. The Compose UI and MLflow use
+`http://localhost:5000` and `http://localhost:5001`, respectively; the Python-only instructions
+use those same ports for the gateway and tracking UI.
 
 ### Server settings
 
@@ -215,14 +265,19 @@ HTTP 429 with a `Retry-After: 60` header.
 
 The frontend is served from `web/static/index.html`.
 
-- **New prediction:** enter the 11 required clinical features and choose ML, DL, or QML.
+- **New prediction:** enter the 11 required clinical features and choose from active,
+  validated models. The picker displays each model family and exact version; unvalidated or inactive
+  candidates are not selectable.
   Numeric fields show their unit and valid range; categorical fields are dropdowns.
 - **Prediction result:** review the returned label, probability, risk category, model version,
   top feature contributions, and disclaimer.
 - **Prediction history:** review the authenticated user's saved prediction records.
-- **Administration:** administrators can create users, inspect audit events, and activate
-  validated models.
-- **Model registry:** administrators and ML Engineers can inspect registered model versions.
+- **Administration:** administrators can create users, inspect audit events, and activate or
+  deactivate validated model versions independently. Multiple versions in the same family may
+  remain active and selectable.
+- **Model registry:** administrators and ML Engineers can compare each candidate's framework,
+  algorithm, held-out accuracy, recall and ROC-AUC, then activate or deactivate a validated version.
+  The **Open MLflow** link opens the Compose tracking UI at `http://localhost:5001`.
 
 The browser performs usability validation, while the Flask API remains authoritative for
 input validation and access control. Never treat client-side validation as a security boundary.
@@ -270,10 +325,11 @@ remote with `dvc remote add` and `dvc push`.
 
 MLflow is a Compose service at http://localhost:5001. It stores run metadata in a
 persistent local SQLite database and proxies run artifacts into the `mlflow_data` volume.
-The training pipeline logs one MLflow run per ML, DL, and QML model, including dataset
-hash, validation status, accuracy, recall, precision, F1, ROC AUC, model-specific
-parameters, registry entry, model, and preprocessing artifacts. The startup script waits
-for MLflow, runs `dvc repro`, then starts the
+The training pipeline logs six MLflow runs (one per candidate), including dataset hash,
+validation and active status, framework, algorithm, accuracy, recall, precision, F1, ROC-AUC,
+confusion-matrix counts, model-specific parameters, cross-validation scores where run, registry
+entry, model, and preprocessing artifacts. The Model Registry page links to MLflow so users can
+inspect and compare the recorded runs. The startup script waits for MLflow, runs `dvc repro`, then starts the
 application. DVC and MLflow state are local-only; configure a shared DVC remote and
 authenticated, durable MLflow backend/artifact storage before using them across machines
 or in production. Existing runs made before artifact-proxy configuration are retained in
@@ -375,28 +431,34 @@ host `models/` directory.
 Install the project dependencies, then run:
 
 ```powershell
-python -m pytest -q
+$env:FLASK_AUTOCREATE = "0"
+$env:DATABASE_URL = "sqlite://"
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-The automated suite covers the API, prediction services and additional test-plan cases:
+The automated suite covers the API and prediction services:
 
 - **`tests/test_api.py`** — gateway: login, lockout, validation, prediction, history isolation,
   role-based access, password acceptance, service failure and rate limiting. They use an isolated
   SQLite database, a temporary preprocessing pipeline, and a mocked prediction-service call, so
-  no model services need to be running.
+  no model services need to be running. It also checks model metadata and switching predictions to
+  a different activated model version.
 - **`tests/test_service.py`** — prediction service: successful prediction, rejection of
   `NaN`/`Infinity`, wrong length and wrong types, pipeline-version mismatch, oversized requests,
-  tampered model files, and `/info`. They build a small temporary model.
-- **`tests/test_tc_extra.py`** — cases written to match Test Plan IDs (TC-03, 04, 06, 09, 12,
-  16, 17, 19, 21, 22, 24) plus the generic `INTERNAL_ERROR` handler.
+  tampered model files, `/info`, and prediction against more than one registered version. The
+  tests build small temporary models.
 
 For a focused run:
 
 ```powershell
-python -m pytest tests/test_api.py -v
-python -m pytest tests/test_service.py -v
-python -m pytest tests/test_tc_extra.py -v
+.\.venv\Scripts\python.exe -m pytest tests\test_api.py -v
+.\.venv\Scripts\python.exe -m pytest tests\test_service.py -v
 ```
+
+The separate Playwright browser suite checks the login flow, Clinician model availability and form,
+theme switching, sign-out, and predictions against each active model version. It requires the
+application/services to be running and a local Clinician test account for authenticated checks.
+Setup and commands are in the [Playwright section of PROJECT_GUIDE.md](PROJECT_GUIDE.md#run-the-playwright-browser-test).
 
 Coverage (measured at 73% of the gateway, services and shared code; training scripts are not
 included):
@@ -405,6 +467,34 @@ included):
 pip install pytest-cov
 python -m pytest -q --cov=web --cov=services --cov=common
 ```
+
+### How to read the test plan
+
+The IEEE 829 plan describes what a check proves, its expected result, and whether it has actually
+been run. Keep these categories distinct:
+
+| Test level | Current evidence | What it does not prove |
+|---|---|---|
+| Unit / API contract | `pytest` validates input, auth/RBAC, response schemas, history and registry behavior using temporary data and mocked model calls. | It does not show that live containers, browsers, or real trained models are wired correctly. |
+| Model/service integration | `tests/test_service.py` exercises the internal service with serialized models; the training run checks that all six artifacts can be built and records metrics in MLflow. | It does not establish clinical validity or prove production availability. |
+| Model evaluation | Every model uses the same stratified 80/20 split; ML/DL candidates also report 5-fold CV scores on the training partition. | A single dataset/split is not independent clinical validation; QML has no CV score in this pipeline. |
+| Playwright browser E2E | `npm.cmd run test:e2e` checks login validation, active model choices, clinical form constraints, theme, sign-out, and exact-version predictions. | Clinician checks require a live local app/services and test account; not a clinical validation. |
+| System / UI | Follow the local setup and test login, selecting each active family, result display, clear/reset, registry metrics, and the MLflow link in a browser. | These manual checks are not part of `pytest` and must be recorded separately. |
+| Performance / security / compatibility | `TEST_PLAN.md` records the release-specific checks to run. | They remain unverified until run with the relevant environment and tools; don't report them as passing based on unit tests. |
+
+To run the model and tracking integration locally after dependencies are installed:
+
+```powershell
+python -m training.train --data data/heart.csv --models models
+mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5001
+```
+
+In another terminal, open `http://127.0.0.1:5001`. Confirm six runs exist in the
+`ischemia-predictor` experiment, each run includes its model and preprocessing artifacts, and the
+registry/report show real metrics and validation status. The app does not force an unvalidated
+model to become active. The current test matrix, acceptance criteria, run order, and coverage gaps
+are in [TEST_PLAN.md](TEST_PLAN.md). The IEEE 829 Word document remains the earlier
+three-candidate plan and is not the current execution record.
 
 ## Git workflow
 
@@ -436,7 +526,7 @@ These are recorded in full in SRS Appendix D. Summary:
 | D2 | Inputs | 9 fields | 11 fields (adds fasting blood sugar and ST slope); categories are integer codes; cholesterol and resting BP of 0 treated as missing and imputed |
 | D3 | Target | Myocardial ischemia | `HeartDisease` used as a proxy; the UI still says "Ischemia Likely/Unlikely" |
 | D4 | DL service | TensorFlow/PyTorch | scikit-learn MLP |
-| D5 | QML service | Quantum SDK, 85% target | PennyLane simulator, 4 qubits; 78.8% accuracy and 83.3% recall, so `unvalidated` and not served |
+| D5 | QML service | Quantum SDK, 85% target | Two PennyLane simulator circuit depths; each is evaluated independently and remains unavailable unless it meets both held-out thresholds |
 | D6 | Explanation | Top-5 features | Leave-one-out attribution for all models; internal feature names are shown |
 | D7 | TLS | TLS 1.2+ | The development server uses HTTP; TLS is expected at an ingress or reverse proxy; stored inputs are AES-256-GCM encrypted |
 | D8 | Kubernetes | Orchestrated by Kubernetes | Docker Desktop Kubernetes manifests are provided; web access uses port-forwarding |

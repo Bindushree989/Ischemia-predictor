@@ -3,8 +3,8 @@
 Usage:
   python -m training.train --data data/heart.csv --models models [--qubits 4] [--force-validate]
 
-Outputs in --models: pipeline-1.0.joblib, ml/dl/qml-1.0.joblib, registry.json,
-heldout.csv (for TC-22) and training_report.json (metrics, CV scores, provenance).
+Outputs in --models: pipeline-1.0.joblib, six model artifacts, registry.json,
+heldout.csv (for TC-22), training_report.json, and six MLflow runs.
 """
 import argparse
 import datetime
@@ -21,6 +21,7 @@ from sklearn.metrics import (accuracy_score, confusion_matrix, f1_score, precisi
 from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_score, train_test_split
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import make_pipeline
+from xgboost import XGBClassifier
 
 from common.features import FEATURES, load_csv
 from common.preprocess import PIPELINE_VERSION, build_pipeline, pipeline_path
@@ -39,11 +40,11 @@ def evaluate(model, Z, y):
     prob = model.predict_proba(Z)[:, 1]
     pred = (prob >= 0.5).astype(int)
     tn, fp, fn, tp = confusion_matrix(y, pred, labels=[0, 1]).ravel()
-    return {"accuracy": round(accuracy_score(y, pred), 4),
-            "recall": round(recall_score(y, pred), 4),
-            "precision": round(precision_score(y, pred, zero_division=0), 4),
-            "f1": round(f1_score(y, pred), 4),
-            "roc_auc": round(roc_auc_score(y, prob), 4),
+    return {"accuracy": round(float(accuracy_score(y, pred)), 4),
+            "recall": round(float(recall_score(y, pred)), 4),
+            "precision": round(float(precision_score(y, pred, zero_division=0)), 4),
+            "f1": round(float(f1_score(y, pred)), 4),
+            "roc_auc": round(float(roc_auc_score(y, prob)), 4),
             "confusion": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)}}
 
 
@@ -55,6 +56,26 @@ def cv_scores(estimator, X, y, seed):
         s = cross_val_score(make_pipeline(build_pipeline(), estimator), X, y, cv=cv, scoring=name)
         out[name] = {"mean": round(float(s.mean()), 4), "std": round(float(s.std()), 4)}
     return out
+
+
+def model_parameters(model, model_type, qml_samples=None):
+    """Return small, serializable parameter dictionaries for reports and MLflow."""
+    if isinstance(model, QMLClassifier):
+        return {"qml_samples": qml_samples, "qubits": model.n, "layers": model.layers,
+                "epochs": model.epochs, "learning_rate": model.lr,
+                "features": ",".join(FEATURES[i] for i in model.feature_idx)}
+    parameters = model.get_params(deep=False)
+    if model_type == "ML" and isinstance(model, RandomForestClassifier):
+        return {"n_estimators": parameters["n_estimators"],
+                "min_samples_leaf": parameters["min_samples_leaf"]}
+    if model_type == "ML":
+        return {"n_estimators": parameters["n_estimators"], "max_depth": parameters["max_depth"],
+                "learning_rate": parameters["learning_rate"], "subsample": parameters["subsample"]}
+    if model_type == "DL":
+        return {"hidden_layer_sizes": str(parameters["hidden_layer_sizes"]),
+                "alpha": parameters["alpha"], "max_iter": parameters["max_iter"],
+                "cross_validation_folds": 5}
+    raise ValueError(f"Unsupported model type for parameters: {model_type}")
 
 
 def main():
@@ -79,7 +100,8 @@ def main():
 
     df = load_csv(a.data)
     print("records:", len(df), "positives:", int(df.label.sum()), "negatives:", int((df.label == 0).sum()))
-    X, y = df[FEATURES].values, df.label.values
+    X = df[FEATURES].to_numpy(dtype=float)
+    y = df["label"].to_numpy(dtype=int)
     Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.2, stratify=y, random_state=a.seed)
 
     pipe = build_pipeline().fit(Xtr)
@@ -89,17 +111,34 @@ def main():
         os.path.join(a.models, "heldout.csv"), index=False)
 
     ml = RandomForestClassifier(n_estimators=400, min_samples_leaf=2, random_state=a.seed)
+    xgb = XGBClassifier(
+        n_estimators=300, max_depth=3, learning_rate=0.05, subsample=0.85,
+        colsample_bytree=0.85, objective="binary:logistic", eval_metric="logloss",
+        random_state=a.seed, n_jobs=1,
+    )
     grid = GridSearchCV(MLPClassifier(max_iter=2000, random_state=a.seed),
                         {"hidden_layer_sizes": [(16,), (32,)], "alpha": [0.1, 1.0, 3.0]},
                         cv=5, scoring="accuracy").fit(Ztr, ytr)
     print("DL best params:", grid.best_params_)
     dl = grid.best_estimator_
+    deep_dl = MLPClassifier(
+        hidden_layer_sizes=(64, 32, 16), alpha=0.1, max_iter=2000,
+        early_stopping=True, random_state=a.seed,
+    )
 
-    print("Cross-validating ML and DL on the training split ...")
-    cv = {"ML": cv_scores(ml, Xtr, ytr, a.seed),
-          "DL": cv_scores(MLPClassifier(max_iter=2000, random_state=a.seed, **grid.best_params_),
-                          Xtr, ytr, a.seed)}
+    print("Cross-validating classical ML and DL models on the training split ...")
+    cv = {
+        "ml-1.0": cv_scores(ml, Xtr, ytr, a.seed),
+        "ml-2.0": cv_scores(xgb, Xtr, ytr, a.seed),
+        "dl-1.0": cv_scores(
+            MLPClassifier(max_iter=2000, random_state=a.seed, **grid.best_params_),
+            Xtr, ytr, a.seed,
+        ),
+        "dl-2.0": cv_scores(deep_dl, Xtr, ytr, a.seed),
+    }
     ml.fit(Ztr, ytr)
+    xgb.fit(Ztr, ytr)
+    deep_dl.fit(Ztr, ytr)
 
     top = np.argsort(ml.feature_importances_)[::-1][:a.qubits]
     n = min(a.qml_samples, len(Ztr))
@@ -108,56 +147,72 @@ def main():
     print("Training QML on", n, "samples, qubits:", [FEATURES[i] for i in top])
     qml_m = QMLClassifier(top, epochs=a.qml_epochs, seed=a.seed).fit(
         Ztr[qml_indices], ytr[qml_indices])
+    qml_deep = QMLClassifier(top, layers=5, epochs=a.qml_epochs, seed=a.seed + 1).fit(
+        Ztr[qml_indices], ytr[qml_indices])
 
     registry, report = [], {
         "trained_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "dataset_sha256": sha256(a.data), "rows": int(len(df)), "seed": a.seed,
         "train_rows": int(len(Ztr)), "test_rows": int(len(Zte)),
         "dl_params": {k: (list(v) if isinstance(v, tuple) else v) for k, v in grid.best_params_.items()},
-        "qml": {"features": [FEATURES[i] for i in top], "loss_history": [round(l, 4) for l in qml_m.loss_history_]},
+        "qml": {
+            "features": [FEATURES[i] for i in top],
+            "loss_history": {
+                "qml-1.0": [round(l, 4) for l in qml_m.loss_history_],
+                "qml-2.0": [round(l, 4) for l in qml_deep.loss_history_],
+            },
+        },
         "models": {}}
-    for mtype, model in (("ML", ml), ("DL", dl), ("QML", qml_m)):
+    candidates = (
+        ("ML", "ml-1.0", "scikit-learn", "Random Forest", ml, None),
+        ("ML", "ml-2.0", "XGBoost", "XGBoost Classifier", xgb, None),
+        ("DL", "dl-1.0", "scikit-learn", "Tuned MLP", dl, None),
+        ("DL", "dl-2.0", "scikit-learn", "Deep MLP (64-32-16)", deep_dl, None),
+        ("QML", "qml-1.0", "PennyLane", "Variational Classifier (3 layers)", qml_m, n),
+        ("QML", "qml-2.0", "PennyLane", "Variational Classifier (5 layers)", qml_deep, n),
+    )
+    for mtype, version, framework, algorithm, model, qml_samples in candidates:
         m = evaluate(model, Zte, yte)
         ok = m["accuracy"] >= 0.85 and m["recall"] >= 0.85
-        version = f"{mtype.lower()}-1.0"
         fn = f"{version}.joblib"
         model_path = os.path.join(a.models, fn)
         joblib.dump(model, model_path)
         status = "validated" if (ok or a.force_validate) else "unvalidated"
-        extra = f"  CV acc {cv[mtype]['accuracy']['mean']:.3f}±{cv[mtype]['accuracy']['std']:.3f}" if mtype in cv else ""
+        model_cv = cv.get(version)
+        extra = (f"  CV acc {model_cv['accuracy']['mean']:.3f}±"
+                 f"{model_cv['accuracy']['std']:.3f}") if model_cv else ""
         print(f"{mtype}: accuracy={m['accuracy']:.3f} recall={m['recall']:.3f} "
               f"auc={m['roc_auc']:.3f}{extra} -> {status}")
-        entry = {"type": mtype, "version": version, "file": fn,
+        entry = {"type": mtype, "version": version, "framework": framework,
+                 "algorithm": algorithm, "file": fn,
                  "sha256": sha256(model_path),
                  "pipeline_version": PIPELINE_VERSION, "status": status,
-                 "is_active": status == "validated", "metrics": m}
+                 "is_active": status == "validated" and version.endswith("-1.0"),
+                 "metrics": m}
         registry.append(entry)
-        report["models"][mtype] = {"heldout": m, "cv": cv.get(mtype), "status": status}
+        report["models"][version] = {
+            "type": mtype, "framework": framework, "algorithm": algorithm,
+            "heldout": m, "cv": model_cv, "status": status, "is_active": False,
+        }
 
-        if mtype == "ML":
-            model_params = {"n_estimators": 400, "min_samples_leaf": 2}
-        elif mtype == "DL":
-            model_params = {
-                "hidden_layer_sizes": str(grid.best_params_["hidden_layer_sizes"]),
-                "alpha": grid.best_params_["alpha"],
-                "max_iter": 2000,
-                "cross_validation_folds": 5,
-            }
-        else:
-            model_params = {
-                "qml_samples": n,
-                "qubits": model.n,
-                "layers": model.layers,
-                "epochs": model.epochs,
-                "learning_rate": model.lr,
-                "features": ",".join(FEATURES[i] for i in model.feature_idx),
-            }
+        report["models"][version]["is_active"] = entry["is_active"]
+
+    for entry, candidate in zip(registry, candidates):
+        mtype, version, framework, algorithm, model, qml_samples = candidate
+        model_path = os.path.join(a.models, entry["file"])
+        model_params = model_parameters(model, mtype, qml_samples)
+        metrics = {key: float(value) for key, value in entry["metrics"].items()
+                   if isinstance(value, (int, float))}
+        metrics.update({key: float(value)
+                        for key, value in entry["metrics"]["confusion"].items()})
         with mlflow.start_run(run_name=f"{mtype.lower()}-{version}"):
             mlflow.set_tags({
                 "model_type": mtype,
                 "model_version": version,
+                "framework": framework,
+                "algorithm": algorithm,
                 "pipeline_version": PIPELINE_VERSION,
-                "validation_status": status,
+                "validation_status": entry["status"],
             })
             mlflow.log_params({
                 "dataset": os.path.basename(a.data),
@@ -168,14 +223,13 @@ def main():
                 "decision_threshold": 0.5,
                 **model_params,
             })
-            mlflow.log_metrics({
-                key: value for key, value in m.items() if isinstance(value, (int, float))
-            })
-            mlflow.log_metric("validated", float(status == "validated"))
-            if mtype in cv:
+            mlflow.log_metrics(metrics)
+            mlflow.log_metric("validated", float(entry["status"] == "validated"))
+            mlflow.log_metric("active", float(entry["is_active"]))
+            if version in cv:
                 mlflow.log_metrics({
                     f"cv_{metric}_{stat}": value
-                    for metric, scores in cv[mtype].items()
+                    for metric, scores in cv[version].items()
                     for stat, value in scores.items()
                 })
             mlflow.log_artifact(model_path, artifact_path="model")
