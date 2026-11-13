@@ -102,7 +102,7 @@
     .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
     .btn {
       border: 1px solid transparent; border-radius: 10px; padding: 10px 15px;
-      font-weight: 700; transition: .15s ease; display: inline-flex; justify-content: center; align-items: center; gap: 8px;
+      font-weight: 700; text-decoration: none; transition: .15s ease; display: inline-flex; justify-content: center; align-items: center; gap: 8px;
     }
     .btn-primary { background: var(--primary); color: #fff; }
     .btn-primary:hover { background: var(--primary-dark); }
@@ -260,7 +260,7 @@
                 <div class="field-grid">
                   <div class="field"><label for="f_oldpeak">ST depression / Oldpeak (mm)</label><input id="f_oldpeak" type="number" min="-3" max="7" step="any" required></div>
                   <div class="field"><label for="f_st_slope">ST slope</label><select id="f_st_slope" required><option value="">Select slope</option><option value="0">Upsloping</option><option value="1">Flat</option><option value="2">Downsloping</option></select></div>
-                  <div class="field"><label for="model">Prediction model</label><select id="model"><option value="ML">Machine Learning (ML)</option><option value="DL">Deep Learning (DL)</option><option value="QML">Quantum ML (QML)</option></select></div>
+                  <div class="field"><label for="model">Prediction model</label><select id="model" required><option value="">Loading available validated models…</option></select><p id="modelAvailabilityNote" class="muted" style="font-size:11px;margin-top:5px" role="status"></p></div>
                 </div>
               </div>
               <div id="predictionMessage" class="message" role="alert" aria-live="polite"></div>
@@ -312,8 +312,8 @@
             </form>
           </div>
           <div class="card">
-            <div class="card-head"><div><h2>Model registry</h2><p class="muted">Only validated models can be activated.</p></div><button id="refreshAdmin" class="btn btn-secondary btn-small" type="button">Refresh</button></div>
-            <div class="table-wrap"><table><thead><tr><th>Type</th><th>Version</th><th>Status</th><th>Active</th><th>Action</th></tr></thead><tbody id="adminModelsBody"></tbody></table></div>
+            <div class="card-head"><div><h2>Model registry</h2><p class="muted">Compare held-out metrics; only validated models can be activated.</p></div><button id="refreshAdmin" class="btn btn-secondary btn-small" type="button">Refresh</button></div>
+            <div class="table-wrap"><table><thead><tr><th>Family</th><th>Version</th><th>Framework</th><th>Algorithm</th><th>Accuracy</th><th>Recall</th><th>ROC-AUC</th><th>Status</th><th>Active</th><th>Action</th></tr></thead><tbody id="adminModelsBody"></tbody></table></div>
           </div>
           <div class="card">
             <div class="card-head"><div><h2>Audit log</h2><p class="muted">Latest application events.</p></div></div>
@@ -322,8 +322,19 @@
         </section>
 
         <section id="modelsPage" class="page hidden">
-          <div class="page-heading"><div><div class="eyebrow">Model operations</div><h1>Model registry</h1><p class="muted">Inspect registered model versions and validation state.</p></div><button id="refreshModels" class="btn btn-secondary" type="button">Refresh</button></div>
-          <div class="card"><div class="table-wrap"><table><thead><tr><th>Type</th><th>Version</th><th>Status</th><th>Active</th></tr></thead><tbody id="modelsBody"></tbody></table></div><div id="modelsMessage" class="message" role="status"></div></div>
+          <div class="page-heading">
+            <div><div class="eyebrow">Model operations</div><h1>Model registry</h1><p class="muted">Compare model variants and metrics. Administrators can activate multiple validated versions per family; Clinicians can select any active version.</p></div>
+            <div class="form-actions" style="margin-top:0">
+              <a class="btn btn-secondary" href="http://localhost:5001" target="_blank" rel="noopener noreferrer">Open MLflow</a>
+              <button id="refreshModels" class="btn btn-secondary" type="button">Refresh</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h2>Six candidate architectures</h2><p class="muted">Training creates two candidates in each family: ML (Random Forest and XGBoost), DL (tuned and deeper MLPs), and QML (three- and five-layer PennyLane circuits). Models are activatable only after meeting both the 85% held-out accuracy and recall thresholds. Each validated version can be activated or deactivated independently.</p></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Family</th><th>Version</th><th>Framework</th><th>Algorithm</th><th>Accuracy</th><th>Recall</th><th>ROC-AUC</th><th>Status</th><th>Active</th></tr></thead><tbody id="modelsBody"></tbody></table></div>
+            <div id="modelsMessage" class="message" role="status"></div>
+            <div class="disclaimer">MLflow stores one run per trained candidate, including its dataset hash, parameters, metrics, validation state, model artifact and shared preprocessing artifact. Use the link above to inspect run history; the tracking server must be running.</div>
+          </div>
         </section>
       </main>
     </div>
@@ -402,6 +413,36 @@
       if (pageId === "modelsPage") loadModels();
     }
 
+    async function loadPredictionModels() {
+      const select = $("model");
+      const previousVersion = select.value;
+      const models = await api("GET", "/prediction-models");
+      select.replaceChildren();
+
+      if (!Array.isArray(models) || !models.length) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "No validated active models available";
+        option.disabled = true;
+        select.append(option);
+        $("modelAvailabilityNote").textContent = "An administrator must activate a validated model before predictions can run.";
+        return;
+      }
+
+      for (const model of models) {
+        const option = document.createElement("option");
+        option.value = model.version;
+        option.dataset.modelType = model.type;
+        option.textContent = `${model.type} (${model.version})`;
+        select.append(option);
+      }
+      const selected = models.find(model => model.version === previousVersion)
+        || models.find(model => model.type === "ML")
+        || models[0];
+      select.value = selected.version;
+      $("modelAvailabilityNote").textContent = "Only active, validated versions are selectable.";
+    }
+
     function configureRole(role) {
       state.role = role;
       $("roleChip").textContent = role;
@@ -413,6 +454,11 @@
       document.querySelector('[data-page="predictPage"]').classList.toggle("hidden", !canPredict);
       $("appView").classList.remove("hidden");
       $("loginView").classList.add("hidden");
+      if (canPredict) {
+        loadPredictionModels().catch(error => {
+          $("modelAvailabilityNote").textContent = `Unable to load available models: ${error.message}`;
+        });
+      }
       switchPage(role === "Administrator" ? "historyPage" : canPredict ? "predictPage" : "modelsPage");
     }
 
@@ -524,7 +570,9 @@
       FIELD_IDS.forEach((field) => {
         values[field] = Number($(`f_${field}`).value);
       });
-      values.model = $("model").value;
+      const selectedModel = $("model").selectedOptions[0];
+      values.model = selectedModel.dataset.modelType;
+      values.model_version = selectedModel.value;
       return values;
     }
 
@@ -610,6 +658,11 @@
       row.append(cell);
     }
 
+    function formatMetric(value) {
+      const metric = Number(value);
+      return Number.isFinite(metric) ? `${(metric * 100).toFixed(1)}%` : "—";
+    }
+
     function emptyRow(bodyId, columns, message) {
       const row = document.createElement("tr");
       const cell = document.createElement("td");
@@ -679,11 +732,16 @@
     async function loadModelRows(bodyId, allowActivation) {
       const models = await api("GET", "/models");
       const entries = Array.isArray(models) ? models : [];
-      if (!entries.length) { emptyRow(bodyId, allowActivation ? 5 : 4, "No models are registered."); return; }
+      if (!entries.length) { emptyRow(bodyId, allowActivation ? 10 : 9, "No models are registered."); return; }
       const rows = entries.map(model => {
         const row = document.createElement("tr");
         addCell(row, model.type);
         addCell(row, model.version);
+        addCell(row, model.framework);
+        addCell(row, model.algorithm);
+        addCell(row, formatMetric(model.metrics?.accuracy));
+        addCell(row, formatMetric(model.metrics?.recall));
+        addCell(row, formatMetric(model.metrics?.roc_auc));
         addCell(row, model.status);
         addCell(row, model.is_active ? "Active" : "Inactive");
         if (allowActivation) {
@@ -691,12 +749,13 @@
           const button = document.createElement("button");
           button.className = "btn btn-secondary btn-small";
           button.type = "button";
-          button.textContent = model.is_active ? "Active" : "Activate";
-          button.disabled = model.is_active || model.status !== "validated";
+          button.textContent = model.is_active ? "Deactivate" : "Activate";
+          button.disabled = !model.is_active && !model.can_activate;
           button.addEventListener("click", async () => {
             button.disabled = true;
             try {
-              await api("PUT", `/models/${model.id}/activate`);
+              const action = model.is_active ? "deactivate" : "activate";
+              await api("PUT", `/models/${model.id}/${action}`);
               await loadAdmin();
             } catch (error) {
               setMessage("adminMessage", error.message);
@@ -714,7 +773,7 @@
     async function loadModels() {
       setMessage("modelsMessage", "");
       try { await loadModelRows("modelsBody", false); }
-      catch (error) { emptyRow("modelsBody", 4, "Unable to load model registry."); setMessage("modelsMessage", error.message); }
+      catch (error) { emptyRow("modelsBody", 9, "Unable to load model registry."); setMessage("modelsMessage", error.message); }
     }
 
     async function loadAdmin() {

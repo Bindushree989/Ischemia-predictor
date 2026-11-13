@@ -13,9 +13,12 @@ stages:
       - train.mlflow_experiment
     outs:
       - models/dl-1.0.joblib
+      - models/dl-2.0.joblib
       - models/heldout.csv
       - models/ml-1.0.joblib
+      - models/ml-2.0.joblib
       - models/pipeline-1.0.joblib
       - models/qml-1.0.joblib
+      - models/qml-2.0.joblib
       - models/registry.json
       - models/training_report.json

@@ -2,6 +2,7 @@ numpy
 pandas
 scipy
 scikit-learn
+xgboost>=2.0,<4
 joblib
 flask
 flask-sqlalchemy

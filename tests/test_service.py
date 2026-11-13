@@ -17,9 +17,21 @@ def svc(tmp_path, monkeypatch):
     y = (X[:, 0] > 0).astype(int)
     model = RandomForestClassifier(n_estimators=10, random_state=0).fit(X, y)
     joblib.dump(model, tmp_path / "ml-1.0.joblib")
-    (tmp_path / "registry.json").write_text(json.dumps([{
-        "type": "ML", "version": "ml-1.0", "file": "ml-1.0.joblib", "sha256": sha(tmp_path / "ml-1.0.joblib"),
-        "pipeline_version": PIPELINE_VERSION, "status": "validated", "metrics": {"accuracy": 0.9}}]))
+    joblib.dump(model, tmp_path / "ml-2.0.joblib")
+    (tmp_path / "registry.json").write_text(json.dumps([
+        {
+            "type": "ML", "version": "ml-1.0", "file": "ml-1.0.joblib",
+            "sha256": sha(tmp_path / "ml-1.0.joblib"),
+            "pipeline_version": PIPELINE_VERSION, "status": "validated",
+            "metrics": {"accuracy": 0.9},
+        },
+        {
+            "type": "ML", "version": "ml-2.0", "file": "ml-2.0.joblib",
+            "sha256": sha(tmp_path / "ml-2.0.joblib"),
+            "pipeline_version": PIPELINE_VERSION, "status": "validated",
+            "metrics": {"accuracy": 0.91},
+        },
+    ]))
     from services import model_service as ms
     monkeypatch.setattr(ms, "MODELS_DIR", str(tmp_path))
     monkeypatch.setattr(ms, "_cache", {})
@@ -37,6 +49,13 @@ def test_predict_ok(svc):
     j = r.get_json()
     assert r.status_code == 200 and 0 <= j["probability"] <= 100 and len(j["importances"]) == 5
     assert j["model_type"] == "ML" and j["latency_ms"] >= 0
+
+
+def test_predicts_each_registered_version(svc):
+    client, _ = svc
+    response = client.post("/predict", json=body(model_version="ml-2.0"))
+    assert response.status_code == 200
+    assert response.get_json()["model_version"] == "ml-2.0"
 
 
 def test_rejects_nan_and_inf(svc):

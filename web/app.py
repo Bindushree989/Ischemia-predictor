@@ -97,7 +97,7 @@ class Model(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     type = db.Column(db.String(5))                             # ML | DL | QML
     version = db.Column(db.String(30), unique=True)
-    status = db.Column(db.String(15))                          # "validated" (checksum OK) | "unvalidated"
+    status = db.Column(db.String(15))                          # held-out metric gate result
     checksum = db.Column(db.String(64))                        # expected SHA-256 of the artifact
     file = db.Column(db.String(100))                           # file name inside MODELS_DIR
     pipeline_version = db.Column(db.String(30))                # preprocessing version it was trained with
@@ -289,6 +289,25 @@ def create_app(config=None):
             return "Low"
         return "Moderate" if p <= app.config["RISK_HIGH"] else "High"
 
+    def registry_details():
+        """Return registry metadata keyed by version."""
+        path = os.path.join(app.config["MODELS_DIR"], "registry.json")
+        if not os.path.exists(path):
+            return {}
+        with open(path, encoding="utf-8") as f:
+            return {entry["version"]: entry for entry in json.load(f)}
+
+    def passes_metric_gate(entry):
+        """Check that the recorded held-out accuracy and recall pass promotion."""
+        try:
+            metrics = entry.get("metrics") or {}
+            return (
+                float(metrics.get("accuracy", 0)) >= 0.85
+                and float(metrics.get("recall", 0)) >= 0.85
+            )
+        except (AttributeError, TypeError, ValueError):
+            return False
+
     def sync_registry():
         """Import entries from ``MODELS_DIR/registry.json`` into the Model table.
 
@@ -363,10 +382,11 @@ def create_app(config=None):
 
         Roles: Clinician, ML Engineer.
         Body: all clinical features in ``FEATURES`` plus optional
-        ``patient_ref`` (str) and ``model`` (``ML`` | ``DL`` | ``QML``,
-        defaults to ``DEFAULT_MODEL``).
+        ``patient_ref`` (str), ``model`` (``ML`` | ``DL`` | ``QML``,
+        defaults to ``DEFAULT_MODEL``), and ``model_version`` (an exact,
+        active and validated version).
 
-        Flow: validate inputs -> find the active validated model -> check the
+        Flow: validate inputs -> find the requested active validated version -> check the
         preprocessing version -> transform features -> call the inference
         service (one retry inside a 10 s budget, FR-17) -> encrypt and store
         inputs -> return the result.
@@ -380,10 +400,33 @@ def create_app(config=None):
         values, errs = validate(d)
         if errs:                                              # FR-05, FR-06
             return error("VALIDATION_ERROR", 400, "Some fields are invalid.", fields=errs)
-        mtype = str(d.get("model", app.config["DEFAULT_MODEL"])).upper()
-        if mtype not in SERVICE_URLS:
-            return error("VALIDATION_ERROR", 400, "model must be ML, DL or QML.")
-        row = Model.query.filter_by(type=mtype, is_active=True, status="validated").first()
+        requested_version = d.get("model_version")
+        details = registry_details()
+        if requested_version is not None:
+            if not isinstance(requested_version, str) or not requested_version:
+                return error("VALIDATION_ERROR", 400, "model_version must be a non-empty string.")
+            row = Model.query.filter_by(
+                version=requested_version, is_active=True, status="validated"
+            ).first()
+            if row is None or not passes_metric_gate(details.get(requested_version, {})):
+                return error("MODEL_NOT_AVAILABLE", 400,
+                             "The selected model version is not active and validated.")
+            mtype = row.type
+            if "model" in d and str(d["model"]).upper() != mtype:
+                return error("VALIDATION_ERROR", 400,
+                             "model and model_version must refer to the same family.")
+        else:
+            mtype = str(d.get("model", app.config["DEFAULT_MODEL"])).upper()
+            if mtype not in SERVICE_URLS:
+                return error("VALIDATION_ERROR", 400, "model must be ML, DL or QML.")
+            candidates = Model.query.filter_by(
+                type=mtype, is_active=True, status="validated"
+            ).order_by(Model.id).all()
+            row = next(
+                (candidate for candidate in candidates
+                 if passes_metric_gate(details.get(candidate.version, {}))),
+                None,
+            )
         if row is None:
             return error("SERVICE_UNAVAILABLE", 503,
                          "Prediction service temporarily unavailable, please retry")
@@ -469,8 +512,28 @@ def create_app(config=None):
     @require("Administrator", "ML Engineer")
     def list_models():
         """List all registered models (Administrator, ML Engineer)."""
-        return jsonify([{"id": m.id, "type": m.type, "version": m.version, "status": m.status,
-                         "is_active": m.is_active} for m in Model.query.all()])
+        details = registry_details()
+        return jsonify([{
+            "id": m.id, "type": m.type, "version": m.version,
+            "status": m.status if passes_metric_gate(details.get(m.version, {})) else "unvalidated",
+            "is_active": m.is_active,
+            "framework": details.get(m.version, {}).get("framework", "Unknown"),
+            "algorithm": details.get(m.version, {}).get("algorithm", "Unknown"),
+            "metrics": details.get(m.version, {}).get("metrics", {}),
+            "can_activate": m.status == "validated" and passes_metric_gate(details.get(m.version, {})),
+        } for m in Model.query.all()])
+
+    @app.get("/api/v1/prediction-models")
+    @require("Clinician", "ML Engineer")
+    def prediction_models():
+        """List only active, validated model versions that can accept predictions."""
+        details = registry_details()
+        models = Model.query.filter_by(
+            is_active=True, status="validated"
+        ).order_by(Model.type, Model.version).all()
+        models = [model for model in models
+                  if passes_metric_gate(details.get(model.version, {}))]
+        return jsonify([{"type": model.type, "version": model.version} for model in models])
 
     @app.post("/api/v1/models")
     @require("ML Engineer")
@@ -479,9 +542,9 @@ def create_app(config=None):
 
         Body: ``{type, version, file, sha256, pipeline_version}`` (all strings).
         The file is looked up in ``MODELS_DIR`` by base name and its SHA-256 is
-        compared with ``sha256``. A match gives status ``validated`` (and the
-        entry is appended to ``registry.json`` for the inference services);
-        otherwise the model is saved as ``unvalidated`` and cannot be activated.
+        compared with ``sha256``. A matching checksum verifies file integrity,
+        not held-out performance, so a newly registered model remains
+        ``unvalidated`` and cannot be activated.
 
         201: ``{id, status}``. 400 VALIDATION_ERROR (bad body or duplicate version).
         """
@@ -492,40 +555,54 @@ def create_app(config=None):
         fn = os.path.basename(d["file"])  # basename blocks path traversal
         path = os.path.join(app.config["MODELS_DIR"], fn)
         import hashlib
-        ok = os.path.exists(path) and hashlib.sha256(open(path, "rb").read()).hexdigest() == d["sha256"]
+        ok = os.path.isfile(path) and hashlib.sha256(open(path, "rb").read()).hexdigest() == d["sha256"]
+        if not ok:
+            return error("CHECKSUM_MISMATCH", 400, "Model artifact checksum does not match.")
         if Model.query.filter_by(version=d["version"]).first():
             return error("VALIDATION_ERROR", 400, "Version already registered.")
-        m = Model(type=d["type"], version=d["version"], status="validated" if ok else "unvalidated",
+        m = Model(type=d["type"], version=d["version"], status="unvalidated",
                   checksum=d["sha256"], file=fn, pipeline_version=d["pipeline_version"])
         db.session.add(m)
         db.session.commit()
-        if ok:  # keep the services' registry file in sync
-            rp = os.path.join(app.config["MODELS_DIR"], "registry.json")
-            reg = json.load(open(rp)) if os.path.exists(rp) else []
-            reg.append({"type": m.type, "version": m.version, "file": fn, "sha256": m.checksum,
-                        "pipeline_version": m.pipeline_version, "status": "validated", "is_active": False})
-            json.dump(reg, open(rp, "w"), indent=2)
+        rp = os.path.join(app.config["MODELS_DIR"], "registry.json")
+        reg = json.load(open(rp)) if os.path.exists(rp) else []
+        reg.append({"type": m.type, "version": m.version, "file": fn, "sha256": m.checksum,
+                    "pipeline_version": m.pipeline_version, "status": "unvalidated", "is_active": False})
+        json.dump(reg, open(rp, "w"), indent=2)
         return jsonify(id=m.id, status=m.status), 201
 
     @app.put("/api/v1/models/<int:mid>/activate")
     @require("Administrator")
     def activate(mid):
-        """Make a validated model the active one for its type (Administrator only).
+        """Activate one validated model version (Administrator only).
 
-        Any previously active model of the same type is deactivated.
         200: ``{id, is_active}``. 404 NOT_FOUND, 409 MODEL_NOT_ACTIVATABLE
-        (status is not ``validated``). Audit-logged as ``model_activation``.
+        (held-out metrics do not pass the gate). Audit-logged as ``model_activation``.
         """
         m = db.session.get(Model, mid)
         if not m:
             return error("NOT_FOUND", 404, "Not found.")
         if m.status != "validated":
             return error("MODEL_NOT_ACTIVATABLE", 409, "Model is not validated.")
-        Model.query.filter_by(type=m.type).update({"is_active": False})
+        if not passes_metric_gate(registry_details().get(m.version, {})):
+            return error("MODEL_NOT_ACTIVATABLE", 409,
+                         "Model has not passed the held-out accuracy and recall thresholds.")
         m.is_active = True
         db.session.commit()
         audit("model_activation", g.user.id)
         return jsonify(id=m.id, is_active=True)
+
+    @app.put("/api/v1/models/<int:mid>/deactivate")
+    @require("Administrator")
+    def deactivate(mid):
+        """Deactivate a model version without changing other versions."""
+        m = db.session.get(Model, mid)
+        if not m:
+            return error("NOT_FOUND", 404, "Not found.")
+        m.is_active = False
+        db.session.commit()
+        audit("model_deactivation", g.user.id)
+        return jsonify(id=m.id, is_active=False)
 
     @app.post("/api/v1/admin/users")
     @require("Administrator")

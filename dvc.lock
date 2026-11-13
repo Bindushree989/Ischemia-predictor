@@ -22,12 +22,12 @@ stages:
       size: 36840
     - path: requirements.txt
       hash: md5
-      md5: c3baca5ee02432602e4870a3cd77762d
-      size: 184
+      md5: 4f3161b5d20c32dfec990ed13262ddac
+      size: 201
     - path: training/train.py
       hash: md5
-      md5: bcc1a514743b296aaa3403017d99a176
-      size: 8937
+      md5: b1b99d160b5253f15852d7bdd4faebf3
+      size: 11829
     params:
       params.yaml:
         train.mlflow_experiment: ischemia-predictor
@@ -37,6 +37,10 @@ stages:
       hash: md5
       md5: 82b8dadf6fa0023a091b1eb6f52babea
       size: 21160
+    - path: models/dl-2.0.joblib
+      hash: md5
+      md5: b72fc314c6be2b5fa37acf3d19f1a79e
+      size: 90453
     - path: models/heldout.csv
       hash: md5
       md5: 987e51ecc132fea96787f1381d226beb
@@ -45,6 +49,10 @@ stages:
       hash: md5
       md5: d8f7eb1bde207f506eae4440491bcd0b
       size: 5234569
+    - path: models/ml-2.0.joblib
+      hash: md5
+      md5: efa99d40c8a76d84048f7a3ad23d54f5
+      size: 341814
     - path: models/pipeline-1.0.joblib
       hash: md5
       md5: ccb34de326550da1037b51a58a8dd9fa
@@ -53,11 +61,15 @@ stages:
       hash: md5
       md5: 711209adf53a422b767547ecf970f02f
       size: 1656
+    - path: models/qml-2.0.joblib
+      hash: md5
+      md5: 2e5b8e266c325476df3a4619131db3f9
+      size: 1848
     - path: models/registry.json
       hash: md5
-      md5: 8735a4f2eedfc16be42cc83e1b1a8b9f
-      size: 1565
+      md5: 8d69311dabee7f841bef208df175019a
+      size: 3578
     - path: models/training_report.json
       hash: md5
-      md5: 832e9df4881b8eb8f38a8319fef90804
-      size: 2111
+      md5: ca2141f3bcac8396f245990fa676eb3c
+      size: 4652
